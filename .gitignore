@@ -1,0 +1,66 @@
+# Folder view configuration files and Thumbnail cache files
+.DS_Store
+Desktop.ini
+._*
+Thumbs.db
+.idea/
+
+# Files that might appear on external disks
+.Spotlight-V100
+.Trashes
+
+# Compiled files
+*.py[cod] # Python byte-compiled and optimized files
+*.so     # C extensions
+*.out    # Compiled C++ files
+
+# Distribution / packaging
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments and dependencies
+venv/
+node_modules/
+.sass-cache/
+
+# IDE and Editor specific
+.idea/          # PyCharm
+.mr.developer.cfg
+.project
+.pydevproject
+.ropeproject    # Rope
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+
+# Translations
+*.mo
+*.pot           # Added, usually goes along with *.mo
+
+# Django stuff:
+*.log
+
+# Sphinx documentation
+docs/_build/
+
+# Python cache
+__pycache__/
