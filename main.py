@@ -108,6 +108,18 @@ class AudioEngine:
 
 audio = AudioEngine()
 
+
+ACTIVE_ENGINE = None
+
+
+class LoadRequested(Exception):
+    """Raised when the player requests an immediate manual load."""
+
+
+class QuitRequested(Exception):
+    """Raised when the player chooses to leave the game from a prompt."""
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # TERMINAL UI UTILITIES
 # These functions create the atmospheric presentation layer — typing effects,
@@ -229,6 +241,12 @@ def show_choices(choices: list[str]) -> int:
     """
     Display numbered choices and return the player's valid selection.
 
+    In addition to numeric choices, the player can enter:
+      S = manual save
+      L = manual load
+      Q = save-and-quit / quit without saving
+      H = show help
+
     Args:
         choices: List of choice description strings.
 
@@ -238,17 +256,62 @@ def show_choices(choices: list[str]) -> int:
     print()
     for i, choice in enumerate(choices, 1):
         print(f"  {Fore.YELLOW}{Style.BRIGHT}[{i}]{Style.RESET_ALL} {choice}")
-    print()
+    print(f"\n  {Fore.WHITE}{Style.DIM}Commands: [S]ave  [L]oad  [Q]uit{Style.RESET_ALL}\n")
 
     while True:
+        raw = input(f"  {Fore.YELLOW}▸ {Style.RESET_ALL}").strip()
+        lowered = raw.lower()
+
+        if lowered in {"s", "save"}:
+            if ACTIVE_ENGINE is None:
+                print(f"  {Fore.RED}No active game to save.{Style.RESET_ALL}")
+                continue
+            save_game(ACTIVE_ENGINE.player)
+            continue
+
+        if lowered in {"l", "load"}:
+            saved = load_game()
+            if saved is None:
+                print(f"  {Fore.RED}No save file found.{Style.RESET_ALL}")
+                continue
+            if ACTIVE_ENGINE is not None and not getattr(ACTIVE_ENGINE, f"scene_{saved.current_scene}", None):
+                print(f"  {Fore.RED}Save file is outdated or corrupted. Clearing it now.{Style.RESET_ALL}")
+                delete_save()
+                continue
+            if ACTIVE_ENGINE is not None:
+                ACTIVE_ENGINE.player = saved
+            print(f"\n  {Fore.GREEN}✓ Save loaded. Resuming {saved.name or 'your adventure'} at '{saved.current_scene}'.{Style.RESET_ALL}")
+            pause()
+            raise LoadRequested()
+
+        if lowered in {"h", "help", "?"}:
+            print(f"  {Fore.WHITE}{Style.DIM}Type the number of a choice, or use S to save, L to load, or Q to quit.{Style.RESET_ALL}")
+            continue
+
+        if lowered in {"q", "quit", "exit"}:
+            if ACTIVE_ENGINE is None:
+                raise QuitRequested()
+            while True:
+                confirm = input(
+                    f"  {Fore.YELLOW}Save before quitting? [Y]es / [N]o / [C]ancel ▸ {Style.RESET_ALL}"
+                ).strip().lower()
+                if confirm in {"y", "yes", ""}:
+                    save_game(ACTIVE_ENGINE.player)
+                    raise QuitRequested()
+                if confirm in {"n", "no"}:
+                    raise QuitRequested()
+                if confirm in {"c", "cancel"}:
+                    break
+                print(f"  {Fore.RED}Please enter Y, N, or C.{Style.RESET_ALL}")
+            continue
+
         try:
-            raw = input(f"  {Fore.YELLOW}▸ {Style.RESET_ALL}")
             selection = int(raw)
             if 1 <= selection <= len(choices):
                 return selection
             print(f"  {Fore.RED}Choose a number between 1 and {len(choices)}.{Style.RESET_ALL}")
         except ValueError:
-            print(f"  {Fore.RED}Enter a number.{Style.RESET_ALL}")
+            print(f"  {Fore.RED}Enter a number or use S/L/Q.{Style.RESET_ALL}")
 
 
 def pause(prompt: str = "Press Enter to continue..."):
@@ -549,16 +612,34 @@ def run_combat(player: PlayerState, enemy: Enemy) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def save_game(player: PlayerState):
+def save_game(player: PlayerState, silent: bool = False) -> bool:
     """Serialize the player state to a JSON file."""
     data = asdict(player)
     data["save_timestamp"] = datetime.now().isoformat()
     try:
         with open(SAVE_FILE, "w") as f:
             json.dump(data, f, indent=2)
-        print(f"\n  {Fore.GREEN}✓ Game saved.{Style.RESET_ALL}")
+        if not silent:
+            print(f"\n  {Fore.GREEN}✓ Game saved.{Style.RESET_ALL}")
+        return True
     except IOError as e:
-        print(f"\n  {Fore.RED}Save failed: {e}{Style.RESET_ALL}")
+        if not silent:
+            print(f"\n  {Fore.RED}Save failed: {e}{Style.RESET_ALL}")
+        return False
+
+
+def delete_save(silent: bool = False) -> bool:
+    """Delete the active save file if one exists."""
+    try:
+        if os.path.exists(SAVE_FILE):
+            os.remove(SAVE_FILE)
+            if not silent:
+                print(f"\n  {Fore.YELLOW}Save cleared.{Style.RESET_ALL}")
+        return True
+    except OSError as e:
+        if not silent:
+            print(f"\n  {Fore.RED}Could not clear save: {e}{Style.RESET_ALL}")
+        return False
 
 
 def load_game() -> Optional[PlayerState]:
@@ -597,6 +678,8 @@ class GameEngine:
 
     def run(self):
         """Start the game loop, dispatching to scene methods."""
+        global ACTIVE_ENGINE
+        ACTIVE_ENGINE = self
         audio.play_music("song.mp3", volume=0.4)
 
         while self.running:
@@ -605,12 +688,20 @@ class GameEngine:
                 print(f"{Fore.RED}ERROR: Unknown scene '{self.player.current_scene}'{Style.RESET_ALL}")
                 self.running = False
                 break
-            next_scene = scene_method()
+            try:
+                next_scene = scene_method()
+            except LoadRequested:
+                continue
+            except QuitRequested:
+                self.running = False
+                break
+
             if next_scene is None:
                 self.running = False
             else:
                 self.player.current_scene = next_scene
                 self.player.choices_made += 1
+                save_game(self.player, silent=True)  # Autosave after each successful scene transition
 
     # ══════════════════════════════════════════════════════════════════════
     #  TITLE & SETUP SCENES
@@ -627,8 +718,12 @@ class GameEngine:
         print()
         horizontal_rule("─", Fore.RED + Style.DIM)
 
-        options = ["New Game"]
         saved = load_game()
+        if saved and not getattr(self, f"scene_{saved.current_scene}", None):
+            saved = None
+            delete_save(silent=True)
+
+        options = ["New Game"]
         if saved:
             options.append(f"Continue as {saved.name} ({saved.character.title()})")
         options.append("Quit")
@@ -636,6 +731,8 @@ class GameEngine:
         choice = show_choices(options)
 
         if choice == 1:
+            self.player = PlayerState(current_scene="intro")
+            save_game(self.player, silent=True)
             return "intro"
         elif choice == 2 and saved:
             self.player = saved
@@ -668,6 +765,12 @@ class GameEngine:
 
         print()
         type_text(f"Welcome, {self.player.name}. Choose your destiny.", color=Fore.YELLOW)
+        print()
+        type_text(
+            "Tip: During choice prompts, you can type S to save, L to load, or Q to quit.",
+            color=Fore.WHITE + Style.DIM,
+            speed=TYPE_SPEED_FAST,
+        )
 
         choice = show_choices([
             f"{Fore.RED}Anakin Skywalker{Style.RESET_ALL} — The Chosen One, consumed by rage",
@@ -1395,12 +1498,14 @@ class GameEngine:
         centered("May the Force be with you.", Fore.YELLOW)
         horizontal_rule("─", Fore.WHITE + Style.DIM)
 
+        delete_save(silent=True)  # Completed runs should not resume from an old autosave
+
         # Offer to play again
+
         print()
         choice = show_choices(["Play Again", "Quit"])
         if choice == 1:
-            self.player = PlayerState()
-            self.player.current_scene = "title"
+            self.player = PlayerState(current_scene="title")
             self.running = True
         else:
             self.running = False
@@ -1415,8 +1520,9 @@ if __name__ == "__main__":
         engine = GameEngine()
         engine.run()
     except KeyboardInterrupt:
-        # Handle Ctrl+C gracefully
-        print(f"\n\n  {Fore.YELLOW}The Force will be with you... always.{Style.RESET_ALL}\n")
+        if 'engine' in locals() and getattr(engine, 'player', None):
+            save_game(engine.player, silent=True)
+        print(f"\n\n  {Fore.YELLOW}Progress saved. The Force will be with you... always.{Style.RESET_ALL}\n")
         sys.exit(0)
     finally:
         audio.stop_music()
