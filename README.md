@@ -1,429 +1,179 @@
-# StarWars-Text-Adventure
+# Star Wars: Duel of Fates
 
-> A cinematic, choice-driven **text adventure game** set during the Mustafar duel from **Star Wars: Episode III – Revenge of the Sith**.
+**Duel of Fates** is an unofficial, fan-made cinematic terminal adventure inspired by the Mustafar confrontation in *Star Wars: Episode III - Revenge of the Sith*.
 
-**Duel of Fates** is a Python terminal game that reimagines the confrontation between **Anakin Skywalker** and **Obi-Wan Kenobi** as an interactive narrative. Instead of retelling the scene in a strictly linear way, the project lets the player shape the outcome through branching choices, morality shifts, turn-based combat, item usage, and multiple endings.
-
-Whether you play as a fallen hero on the edge of total corruption or as a Jedi trying to save his brother, your decisions affect the story, the duel, and the final fate of Mustafar.
-
----
+The game reimagines the fall of the Republic as an interactive text RPG with branching scenes, playable protagonists, morality shifts, relationship meters, turn-based duels, secret evidence, animated terminal set pieces, optional music, and multiple alternate endings.
 
 ## Features
 
-- **Two playable protagonists**: choose **Anakin Skywalker** or **Obi-Wan Kenobi**
-- **Branching narrative paths** with route-specific scenes and alternate outcomes
-- **Morality system** that tracks your movement toward the Light Side, Dark Side, or a conflicted middle ground
-- **Turn-based combat** with attacks, defense, Force abilities, critical hits, and item-based actions
-- **Inventory system** with route-specific collectibles and usable combat items
-- **Multiple endings**, including canon-inspired and non-canon “what if?” outcomes
-- **Secret plot web** involving Sidious’s Mustafar contingency, hidden recordings, Force visions, and alternate rebellion paths
-- **Relationship meters** for Padmé and the Anakin/Obi-Wan brotherhood, affecting dialogue, combat pressure, and secret endings
-- **Clarity and codex systems** that track how deeply the player understands the trap behind the duel
-- **Terminal animations and pixel-style portraits** for lava flows, saber locks, holocrons, transmissions, and key characters
-- **Atmospheric terminal UI** with typewriter text, colored dialogue, boxed scene headers, and ASCII art
-- **Audio support** through `pygame`, with graceful fallback if audio is unavailable
-- **Save/load groundwork** using JSON-based player state data
+- Three playable routes: **Anakin Skywalker**, **Obi-Wan Kenobi**, and **Padme Amidala**
+- Branching narrative scenes with route-specific choices, consequences, and endings
+- Morality, clarity, relationship, codex, secret, and memory-shard systems
+- Turn-based lightsaber combat with stamina, Force power, items, enemy defense, and critical hits
+- Padme route focused on political thriller choices, survival, evidence, broadcasts, and rebellion-building
+- Animated terminal set pieces for lava surges, saber locks, Senate transmissions, medical scans, escapes, and mask-forging moments
+- Pixel-style ASCII portraits for major characters
+- Dynamic audio moods and synthesized SFX through `pygame`
+- Manual save, load, autosave, and runtime save cleanup after completed endings
+- Fast test mode through `DUEL_OF_FATES_FAST=1`
 
----
+## Playable Routes
 
-## Preview
+### Anakin Skywalker
 
-### Play as Anakin
-Walk the line between love, rage, ambition, and regret.
+Anakin's route follows rage, fear, prophecy, manipulation, and the possibility of refusing the fate prepared for him.
 
-- search the Mustafar control room for useful items
-- confront Padmé in different ways
-- resist or embrace the dark side
-- duel Obi-Wan with different emotional states affecting the outcome
-- unlock redemption, exile, domination, or tragedy
-- uncover Sidious’s hidden contingency for Mustafar
-- spare, exploit, or destroy K-4S, a damaged tactical droid whose fate can matter later
-- trigger secret rebellion outcomes by combining trust, proof, and clarity
+Route highlights:
 
-### Play as Obi-Wan
-Take the role of a Jedi trying to stop catastrophe without giving up hope.
+- Search the Separatist facility for tools and hidden evidence
+- Discover Sidious's Mustafar contingency
+- Experience Force visions and memory shards
+- Decide Padme's fate, Obi-Wan's fate, and whether Vader is inevitable
+- Unlock dark, redemptive, exile, alliance, and rebellion endings
 
-- choose whether to intervene early or wait
-- search Padmé’s ship for supplies
-- appeal to Anakin’s remaining goodness
-- fight through the duel from Obi-Wan’s perspective
-- pursue duty, mercy, sacrifice, or a miracle outcome
-- hear a Force echo from Qui-Gon that reframes the duel as a Sith trap
-- warn Bail Organa, stabilize Padmé, or call to Anakin through the Force
-- unlock the secret “Broken Mask” ending by refusing Sidious’s script
+### Obi-Wan Kenobi
 
----
+Obi-Wan's route explores duty, grief, mercy, and the danger of accepting a tragedy written by the Sith.
 
-## Screens and Systems Included
+Route highlights:
 
-### Branching story structure
-This is no longer a simple one-path text adventure. The current script contains:
+- Choose when and how to confront Anakin
+- Hear a Force echo that reframes Mustafar as a staged wound
+- Warn Bail Organa, stabilize Padme, or call to Anakin through the Force
+- Duel Anakin with relationship and clarity effects
+- Unlock canon-inspired, mercy, miracle, and secret broken-mask endings
 
-- two distinct character routes
-- route-specific dialogue and scene transitions
-- optional exploration scenes
-- hidden story branches
-- multiple route-dependent endings
-- post-duel collapse scenes where earlier choices return as consequences
+### Padme Amidala
 
-### Morality and alignment
-The player has a morality score that shifts based on decisions.
+Padme's route turns the Mustafar arc into a political survival thriller.
 
-- **positive morality** pushes the player toward the **Light Side**
-- **negative morality** pushes the player toward the **Dark Side**
-- values near the center reflect a more **conflicted** character state
+Route highlights:
 
-Morality affects both presentation and gameplay. In some sections it changes the tone of scenes, opens alternate paths, or influences combat flavor and encounter balance.
+- Investigate Palpatine's emergency records on Coruscant
+- Build early resistance links with Bail Organa
+- Bring evidence, medical support, transmitters, or droid escape plans to Mustafar
+- Confront Anakin with love, proof, truth, or public witness
+- Turn the duel into a broadcast, rescue, cover-up, or rebellion
+- Unlock endings where Padme becomes a hidden survivor, public rebel, ruthless imperial enemy, or the person who keeps Anakin alive and answerable
 
-### Relationship, clarity, and secrets
-The expanded version adds run-long story memory.
+## Game Systems
 
-- **Padmé Bond** tracks whether Anakin/Obi-Wan protects, trusts, or harms Padmé
-- **Brotherhood Bond** tracks the emotional bridge between Anakin and Obi-Wan
-- **Clarity** measures how clearly the player sees Sidious’s manipulation
-- **Secrets Found** tracks hidden discoveries such as K-4S surviving, Bail being warned, and Sidious’s Kenobi contingency
-- **Codex entries** summarize major discoveries and encourage replay
+### Morality
 
-### Turn-based combat
-The duel sequences use a structured combat loop with player and enemy stats.
+Morality tracks movement toward the Light Side, Dark Side, or a conflicted middle. It changes dialogue, unlocks or blocks certain outcomes, and influences combat tone.
 
-Combat actions currently include:
+### Clarity
 
-- **Strike**
-- **Defend**
-- **Force Push**
-- **Force Heal**
-- **Center Yourself**
-- **Use Bacta Patch** *(when available)*
-- **Fire Emergency Flare** *(when available)*
-- **Throw Thermal Detonator** *(when available)*
+Clarity measures how well the current protagonist understands Sidious's manipulation. High clarity opens secret routes, stronger confrontation options, and public truth endings.
 
-Combat also includes:
+### Relationships
 
-- randomized damage ranges
-- critical hits
-- stamina pressure
-- enemy defense
-- Force power costs
-- enemy dialogue during battle
-- defensive damage reduction
-- stun chances on Force-based actions
+Two major relationship meters shape the story:
 
-### Inventory and items
-The player can collect and use items during the run.
+- **Padme Bond**: trust, love, protection, and emotional connection around Padme
+- **Brotherhood Bond**: the remaining bridge between Anakin and Obi-Wan
 
-Examples present in the code include:
+### Codex
 
-- **Lightsaber (Blue)**
-- **Jedi Comlink**
-- **Thermal Detonator**
-- **Bacta Patch**
-- **Emergency Flare**
-- **Sidious Recording**
-- **Droid Transponder**
-- **Sabotage Spike**
-- **Medpac Beacon**
+The codex records discoveries such as hidden files, Force insights, character truths, and political evidence. It can be opened during most choice prompts with `C`.
 
-### Terminal presentation
-The game is designed to feel dramatic in the command line.
+### Memory Shards
 
-It currently includes:
+Memory shards are emotional fragments unlocked by visions, old promises, confessions, and pivotal choices. They can be opened during most choice prompts with `M`.
 
-- typewriter-style text output
-- colored scene text and dialogue using `colorama`
-- centered titles and boxed chapter headers
-- ASCII art for key moments and endings
-- animated ASCII frames for lava, saber clashes, visions, and transmissions
-- pixel-style character portraits
-- a compact player HUD during gameplay
+### Combat
 
-### Audio engine
-The project includes an `AudioEngine` powered by `pygame`.
+Combat includes:
 
-Current behavior in the code:
+- Strike
+- Defend
+- Force Push
+- Force Heal
+- Center Yourself
+- Bacta Patch usage
+- Emergency Flare usage
+- Thermal Detonator usage
+- Stamina pressure
+- Enemy defense
+- Stuns, critical hits, and mid-fight dialogue
 
-- attempts to initialize `pygame.mixer`
-- plays looping background music if a valid audio file is present
-- supports one-shot sound effects in the engine
-- fails gracefully if audio is not available
+### Audio
 
----
+The game uses `pygame` for optional audio. If audio is unavailable, the game continues silently.
 
-## Endings Currently in the Code
+Audio behavior includes:
 
-The project includes **12 ending scenes** across both routes.
-
-### Anakin endings
-1. **The Dark Lord Rises**
-2. **Chosen One — Fallen**
-3. **Redemption — The Chosen One Returns**
-4. **Exile — Neither Jedi Nor Sith**
-5. **The Empty Throne**
-6. **The Grey Path — A New Order**
-7. **Secret Ending — The First Rebellion**
-
-### Obi-Wan endings
-1. **The Faithful Jedi — Duty Fulfilled**
-2. **The Jedi Falls — Darkness Reigns**
-3. **The Miracle — Brothers Reunited**
-4. **The Long Road — Mercy Endures**
-5. **Secret Ending — The Broken Mask**
-
----
-
-## Tech Stack
-
-- **Python 3.8+**
-- **colorama** for terminal colors and styled text
-- **pygame** for audio playback
-- **JSON** for save-state serialization
-
----
+- Music mood changes by scene type
+- Reuse of `song.mp3` when present
+- Synthesized SFX cues for choices, secrets, memories, damage, healing, and clashes
+- Graceful fallback without required sound-effect files
 
 ## Installation
 
-Clone the repository and install the required dependencies:
-
 ```bash
-git clone <your-repo-url>
+git clone git@github.com:alinikan/StarWars-Text-Adventure.git
 cd StarWars-Text-Adventure
 pip install -r requirements.txt
 ```
 
----
-
-## Run the Game
-
-```bash
-python main.py
-```
-
-If your system uses `python3`, run:
+## Run
 
 ```bash
 python3 main.py
 ```
 
----
+Fast mode for testing:
+
+```bash
+DUEL_OF_FATES_FAST=1 python3 main.py
+```
+
+## Controls
+
+During choice prompts:
+
+- Enter a number to choose an option
+- `S` saves the current game
+- `L` loads the current save
+- `C` opens the codex and status menu
+- `M` opens memory shards
+- `Q` quits, with an option to save first
+- `H` shows command help
 
 ## Project Structure
 
 ```text
 StarWars-Text-Adventure/
-├── EXPANSION_IDEAS.md        # next-step design roadmap
-├── main.py
-├── README.md
-├── requirements.txt
-├── song.mp3                  # optional
-└── duel_of_fates_save.json   # generated when applicable
+├── main.py                  # game code
+├── README.md                # public project documentation
+├── requirements.txt         # Python dependencies
+├── song.mp3                 # optional background music
+└── duel_of_fates_save.json  # generated runtime save, ignored by Git
 ```
 
-### Notes
-- `song.mp3` is optional
-- if no audio file is present, the game should still run normally
-- the save file is JSON-based, generated at runtime, and ignored by Git
-- set `DUEL_OF_FATES_FAST=1` to skip typing/animation delays while testing
+## Dependencies
 
----
+- Python 3.8+
+- `colorama`
+- `pygame`
 
-## Gameplay Flow
+## Save Data
 
-### 1. Title screen
-The title screen can:
+The game writes `duel_of_fates_save.json` during play. The file is runtime state and is ignored by Git.
 
-- start a new game
-- continue from a detected save file
-- quit the game
+Completed runs delete the active save so finished endings do not resume from old autosave points.
 
-### 2. Character setup
-The player:
+## Status
 
-1. enters a name
-2. selects **Anakin Skywalker** or **Obi-Wan Kenobi**
+The current version includes:
 
-That choice determines:
+- 45 narrative scenes
+- 3 playable routes
+- 17 ending scenes
+- In-game codex and memory menus
+- Animated terminal set pieces
+- Dynamic audio mood and SFX cues
 
-- starting morality
-- starting inventory
-- scene progression
-- route-specific choices and endings
+## Disclaimer
 
-### 3. Narrative choices
-Throughout the game, the player selects numbered options in the terminal. Those choices shape:
-
-- the immediate dialogue
-- morality shifts
-- route-specific scene branches
-- combat context
-- final ending outcomes
-
-### 4. Combat encounters
-Combat runs in rounds until one side is defeated. The player can:
-
-- attack directly
-- defend for reduced incoming damage
-- spend Force points on abilities
-- use certain items if available
-
-### 5. End-of-run stats
-At the end of a playthrough, the game displays a summary that includes:
-
-- player name
-- selected character
-- alignment
-- morality score
-- remaining health
-- number of choices made
-- items found
-
----
-
-## Core Code Components
-
-### `AudioEngine`
-Handles:
-
-- background music
-- sound effect playback
-- graceful failure when audio is unavailable
-
-### `PlayerState`
-Tracks:
-
-- player name
-- selected character
-- health and max health
-- Force power and max Force power
-- morality
-- stamina
-- inventory
-- route flags
-- current scene
-- choices made
-
-### `Enemy`
-Defines combat opponents with:
-
-- name
-- health
-- max health
-- attack power
-- defense
-- optional combat dialogue
-
-### `run_combat()`
-Executes the turn-based duel system and returns a combat result such as:
-
-- `victory`
-- `defeat`
-- `fled` *(documented in the function, though not currently exposed as a menu option)*
-
-### `GameEngine`
-Controls the full gameplay loop by:
-
-- maintaining player state
-- dispatching scenes
-- updating the active route
-- progressing the story until an ending is reached
-
----
-
-## Save System Status
-
-The code includes a JSON save/load system built around:
-
-```text
-duel_of_fates_save.json
-```
-
-What is currently true in the code:
-
-- loading an existing save is implemented from the title screen
-- a `save_game()` function exists
-- manual save and autosave are **not yet fully wired into the active gameplay loop**
-
-That means the project already has save-system groundwork, but loading is currently more complete than active in-game saving.
-
----
-
-## Known Limitations
-
-A few implementation details are worth noting:
-
-- `save_game()` exists, but saving is not currently triggered during normal play
-- the audio engine supports sound effects, but the game flow mainly uses background music
-- combat documentation mentions a `fled` outcome, but there is no flee option in the current combat action menu
-- some imports and types appear to be unused in the current script
-
-These do not prevent the game from running, but they are good opportunities for polish and expansion.
-
----
-
-## Roadmap Ideas
-
-Good next upgrades for the project could include:
-
-- wiring manual save and autosave into gameplay
-- adding more Mustafar scenes before the duel
-- expanding inventory usage outside combat
-- introducing more enemies or encounters
-- adding sound effects at major story beats
-- including difficulty settings
-- adding a real flee mechanic in combat
-- splitting the project into multiple modules for maintainability
-- adding screenshots or terminal GIFs to the README
-
----
-
-## Why This Project Stands Out
-
-This project blends several appealing ideas into one experience:
-
-- **interactive fiction**
-- **Star Wars alternate-history storytelling**
-- **RPG-lite combat systems**
-- **terminal UI design**
-- **cinematic presentation in Python**
-
-It feels like a mix between a command-line game, a branching fan-fiction experience, and a playable “what if?” version of one of the most iconic duels in Star Wars.
-
----
-
-## Credits
-
-Inspired by:
-
-- **Star Wars: Episode III – Revenge of the Sith**
-- the Mustafar duel between **Anakin Skywalker** and **Obi-Wan Kenobi**
-
-Built with:
-
-- **Python**
-- **colorama**
-- **pygame**
-
----
-
-## License
-
-Add your preferred license here if you plan to publish the project publicly.
-
-Popular options include:
-
-- MIT License
-- Apache 2.0
-- GPL-3.0
-
----
-
-## Support the Project
-
-If you expand this game, consider adding:
-
-- screenshots or terminal captures
-- a changelog
-- a license file
-- badges for Python version and dependencies
-- a future releases section
-
-If you’re putting this on GitHub, a polished next step would be adding a `LICENSE` file and a few screenshots near the top of the README.
+This is an unofficial fan project. Star Wars and related names, characters, and settings belong to their respective rights holders.

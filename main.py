@@ -11,11 +11,14 @@
 ║  Features:                                                                 ║
 ║    • Morality system that tracks light/dark alignment                      ║
 ║    • Turn-based combat with Force powers and stamina management            ║
+║    • Three playable routes: Anakin, Obi-Wan, and Padmé                    ║
 ║    • Inventory system with collectible items                               ║
 ║    • Relationship, clarity, codex, and secret-discovery systems            ║
+║    • Codex and memory shard menus available during play                    ║
 ║    • Dynamic narrative that reacts to your choices                         ║
 ║    • Multiple endings (including secret paths)                             ║
-║    • Atmospheric typing effects, animations, and pixel portraits           ║
+║    • Atmospheric typing effects, animated set pieces, and pixel portraits  ║
+║    • Dynamic music moods and synthesized terminal SFX                      ║
 ║    • Autosave and manual save/load support                                 ║
 ║                                                                            ║
 ║  Requirements: Python 3.8+, colorama, pygame                               ║
@@ -29,6 +32,8 @@ import json
 import time
 import random
 import textwrap
+import math
+import struct
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Callable
@@ -72,11 +77,23 @@ def sleep_scaled(seconds: float):
 
 
 class AudioEngine:
-    """Manages background music and one-shot sound effects."""
+    """Manages optional background music, mood changes, and synthesized SFX."""
 
     def __init__(self):
         self.enabled = False
+        self.current_music = None
+        self.current_mood = None
+        self.mood_volume = {
+            "title": 0.35,
+            "tension": 0.42,
+            "dark": 0.48,
+            "duel": 0.58,
+            "hope": 0.38,
+            "tragedy": 0.30,
+            "silence": 0.0,
+        }
         try:
+            pygame.mixer.pre_init(44100, -16, 1, 512)
             pygame.mixer.init()
             self.enabled = True
         except pygame.error:
@@ -94,11 +111,31 @@ class AudioEngine:
         if not self.enabled:
             return
         try:
+            if self.current_music == filename and pygame.mixer.music.get_busy():
+                pygame.mixer.music.set_volume(volume)
+                return
             pygame.mixer.music.load(filename)
             pygame.mixer.music.set_volume(volume)
             pygame.mixer.music.play(loops)
+            self.current_music = filename
         except pygame.error:
             pass
+
+    def set_mood(self, mood: str):
+        """Switch music intensity for the current scene."""
+        if not self.enabled:
+            return
+        if mood == self.current_mood:
+            return
+        self.current_mood = mood
+        if mood == "silence":
+            self.stop_music()
+            return
+        volume = self.mood_volume.get(mood, 0.4)
+        if os.path.exists("song.mp3"):
+            self.play_music("song.mp3", volume=volume)
+        elif pygame.mixer.music.get_busy():
+            pygame.mixer.music.set_volume(volume)
 
     def play_sfx(self, filename: str, volume: float = 0.7):
         """Play a one-shot sound effect."""
@@ -111,10 +148,46 @@ class AudioEngine:
         except pygame.error:
             pass
 
+    def play_tone(self, frequency: int, duration: float = 0.08, volume: float = 0.18):
+        """Play a tiny synthesized tone without requiring sound-effect files."""
+        if not self.enabled or FAST_MODE:
+            return
+        try:
+            sample_rate = 44100
+            sample_count = int(sample_rate * duration)
+            amplitude = int(32767 * max(0.0, min(volume, 1.0)))
+            raw = bytearray()
+            for i in range(sample_count):
+                envelope = 1.0 - (i / max(1, sample_count))
+                sample = int(amplitude * envelope * math.sin(2 * math.pi * frequency * i / sample_rate))
+                raw.extend(struct.pack("<h", sample))
+            pygame.mixer.Sound(buffer=bytes(raw)).play()
+        except (pygame.error, ValueError):
+            pass
+
+    def play_sfx_cue(self, cue: str):
+        """Play a named synthesized UI/story cue."""
+        cues = {
+            "select": [(660, 0.035, 0.08)],
+            "save": [(523, 0.05, 0.10), (784, 0.06, 0.10)],
+            "secret": [(392, 0.07, 0.12), (587, 0.07, 0.12), (880, 0.12, 0.14)],
+            "memory": [(330, 0.08, 0.10), (494, 0.10, 0.10)],
+            "light": [(587, 0.07, 0.11), (880, 0.09, 0.12)],
+            "dark": [(220, 0.10, 0.14), (165, 0.12, 0.14)],
+            "damage": [(120, 0.08, 0.20)],
+            "heal": [(440, 0.06, 0.10), (660, 0.08, 0.10)],
+            "clash": [(260, 0.05, 0.16), (740, 0.05, 0.12)],
+            "broadcast": [(440, 0.04, 0.08), (554, 0.04, 0.08), (659, 0.08, 0.10)],
+        }
+        for frequency, duration, volume in cues.get(cue, []):
+            self.play_tone(frequency, duration, volume)
+            sleep_scaled(duration * 0.35)
+
     def stop_music(self):
         """Fade out and stop background music."""
         if self.enabled:
             pygame.mixer.music.fadeout(2000)
+            self.current_music = None
 
 
 audio = AudioEngine()
@@ -245,6 +318,7 @@ def status_bar(player: "PlayerState"):
     print(f"│ {Fore.GREEN}STA {player.stamina:>3}/100"
           f"  {Fore.MAGENTA}Clarity {getattr(player, 'clarity', 0):>2}"
           f"  {Fore.YELLOW}Secrets {getattr(player, 'secrets_found', 0):>2}"
+          f"  {Fore.BLUE}Mem {len(getattr(player, 'memory_shards', [])):>2}"
           f"{Style.RESET_ALL}{Style.DIM}")
     if player.inventory:
         items = ", ".join(player.inventory)
@@ -259,6 +333,8 @@ def show_choices(choices: list[str]) -> int:
     In addition to numeric choices, the player can enter:
       S = manual save
       L = manual load
+      C = codex/status menu
+      M = memory shards
       Q = save-and-quit / quit without saving
       H = show help
 
@@ -271,7 +347,7 @@ def show_choices(choices: list[str]) -> int:
     print()
     for i, choice in enumerate(choices, 1):
         print(f"  {Fore.YELLOW}{Style.BRIGHT}[{i}]{Style.RESET_ALL} {choice}")
-    print(f"\n  {Fore.WHITE}{Style.DIM}Commands: [S]ave  [L]oad  [Q]uit{Style.RESET_ALL}\n")
+    print(f"\n  {Fore.WHITE}{Style.DIM}Commands: [S]ave  [L]oad  [C]odex  [M]emories  [Q]uit{Style.RESET_ALL}\n")
 
     while True:
         raw = input(f"  {Fore.YELLOW}▸ {Style.RESET_ALL}").strip()
@@ -282,6 +358,7 @@ def show_choices(choices: list[str]) -> int:
                 print(f"  {Fore.RED}No active game to save.{Style.RESET_ALL}")
                 continue
             save_game(ACTIVE_ENGINE.player)
+            audio.play_sfx_cue("save")
             continue
 
         if lowered in {"l", "load"}:
@@ -300,7 +377,21 @@ def show_choices(choices: list[str]) -> int:
             raise LoadRequested()
 
         if lowered in {"h", "help", "?"}:
-            print(f"  {Fore.WHITE}{Style.DIM}Type the number of a choice, or use S to save, L to load, or Q to quit.{Style.RESET_ALL}")
+            print(f"  {Fore.WHITE}{Style.DIM}Type a choice number, or use S to save, L to load, C for codex, M for memories, or Q to quit.{Style.RESET_ALL}")
+            continue
+
+        if lowered in {"c", "codex", "journal", "status"}:
+            if ACTIVE_ENGINE is None:
+                print(f"  {Fore.RED}No active codex yet.{Style.RESET_ALL}")
+                continue
+            show_codex_menu(ACTIVE_ENGINE.player)
+            continue
+
+        if lowered in {"m", "memory", "memories", "shards"}:
+            if ACTIVE_ENGINE is None:
+                print(f"  {Fore.RED}No memory shards yet.{Style.RESET_ALL}")
+                continue
+            show_memory_shards(ACTIVE_ENGINE.player)
             continue
 
         if lowered in {"q", "quit", "exit"}:
@@ -323,6 +414,7 @@ def show_choices(choices: list[str]) -> int:
         try:
             selection = int(raw)
             if 1 <= selection <= len(choices):
+                audio.play_sfx_cue("select")
                 return selection
             print(f"  {Fore.RED}Choose a number between 1 and {len(choices)}.{Style.RESET_ALL}")
         except ValueError:
@@ -332,6 +424,71 @@ def show_choices(choices: list[str]) -> int:
 def pause(prompt: str = "Press Enter to continue..."):
     """Wait for the player to press Enter before proceeding."""
     input(f"\n  {Fore.WHITE}{Style.DIM}{prompt}{Style.RESET_ALL}")
+
+
+def alignment_label(player) -> str:
+    """Return a compact alignment label for menus and end screens."""
+    if player.morality >= 5:
+        return "Beacon of Light"
+    if player.morality >= 2:
+        return "Light Side"
+    if player.morality >= -1:
+        return "Conflicted"
+    if player.morality >= -4:
+        return "Dark Side"
+    return "Consumed by Darkness"
+
+
+def show_codex_menu(player):
+    """Display discovered lore, route meters, and run status."""
+    clear_screen()
+    header_box("CODEX & STATUS", player.name or "Unknown Traveler", Fore.BLUE)
+    status_bar(player)
+    print()
+    print(f"  {Fore.WHITE}{Style.DIM}{'Character:':<20}{Style.RESET_ALL}{Fore.YELLOW}{player.character.title() or 'Unchosen'}{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}{Style.DIM}{'Alignment:':<20}{Style.RESET_ALL}{Fore.YELLOW}{alignment_label(player)}{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}{Style.DIM}{'Padme Bond:':<20}{Style.RESET_ALL}{Fore.MAGENTA}{player.bond_padme}{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}{Style.DIM}{'Brotherhood Bond:':<20}{Style.RESET_ALL}{Fore.CYAN}{player.bond_brotherhood}{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}{Style.DIM}{'Clarity:':<20}{Style.RESET_ALL}{Fore.MAGENTA}{player.clarity}{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}{Style.DIM}{'Secrets Found:':<20}{Style.RESET_ALL}{Fore.YELLOW}{player.secrets_found}{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}{Style.DIM}{'Memory Shards:':<20}{Style.RESET_ALL}{Fore.BLUE}{len(getattr(player, 'memory_shards', []))}{Style.RESET_ALL}")
+
+    print()
+    horizontal_rule("─", Fore.BLUE + Style.DIM)
+    centered("DISCOVERED CODEX", Fore.BLUE + Style.BRIGHT)
+    horizontal_rule("─", Fore.BLUE + Style.DIM)
+    if player.codex:
+        for i, entry in enumerate(player.codex, 1):
+            print(f"  {Fore.BLUE}{i:>2}.{Style.RESET_ALL} {entry}")
+    else:
+        print(f"  {Fore.WHITE}{Style.DIM}No codex entries discovered yet.{Style.RESET_ALL}")
+    pause("Press Enter to return to the choice...")
+
+
+def show_memory_shards(player):
+    """Display unlocked memory fragments."""
+    clear_screen()
+    header_box("MEMORY SHARDS", "Fragments the Force has not let go", Fore.MAGENTA)
+    shards = getattr(player, "memory_shards", [])
+    if not shards:
+        type_text("No memory shards have surfaced yet. Look for visions, confessions, "
+                  "hidden recordings, and moments where mercy costs something.",
+                  color=Fore.WHITE + Style.DIM,
+                  speed=TYPE_SPEED_FAST)
+        pause("Press Enter to return to the choice...")
+        return
+
+    for i, shard in enumerate(shards, 1):
+        if isinstance(shard, dict):
+            title = shard.get("title", f"Shard {i}")
+            body = shard.get("body", "")
+        else:
+            title = f"Shard {i}"
+            body = str(shard)
+        print(f"\n  {Fore.MAGENTA}{Style.BRIGHT}{i}. {title}{Style.RESET_ALL}")
+        print(textwrap.fill(body, width=TERMINAL_WIDTH - 6, initial_indent="  ", subsequent_indent="  "))
+    audio.play_sfx_cue("memory")
+    pause("Press Enter to return to the choice...")
 
 
 def animate_frames(frames: list[str], color: str = Fore.WHITE,
@@ -350,6 +507,16 @@ def animate_frames(frames: list[str], color: str = Fore.WHITE,
                 clear_screen()
             print(f"{color}{frame}{Style.RESET_ALL}")
             sleep_scaled(delay)
+
+
+def play_set_piece(name: str, cycles: int = 1, delay: float = 0.14):
+    """Play a named terminal set piece with a matching audio cue."""
+    frames, color, title = SET_PIECES.get(name, ([], Fore.WHITE, name.upper()))
+    if not frames:
+        return
+    audio.play_sfx_cue("broadcast" if "signal" in name else "clash")
+    cinematic_beat(title, "", color)
+    animate_frames(frames, color, cycles=cycles, delay=delay, clear_between=False)
 
 
 def cinematic_beat(title: str, art: str = "", color: str = Fore.YELLOW,
@@ -617,6 +784,111 @@ FORCE_VISION_FRAMES = [
     """,
 ]
 
+SENATE_SIGNAL_FRAMES = [
+    r"""
+       [ CORUSCANT EMERGENCY CHANNEL ]
+       . . . . . . . . . . . . . . .
+       SIGNAL: searching
+       STATUS: unstable
+    """,
+    r"""
+       [ CORUSCANT EMERGENCY CHANNEL ]
+       >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+       SIGNAL: locked
+       STATUS: intercepted
+    """,
+    r"""
+       [ CORUSCANT EMERGENCY CHANNEL ]
+       >>>>>>>>> FREE SENATE <<<<<<<<
+       SIGNAL: live
+       STATUS: dangerous
+    """,
+]
+
+MEDICAL_SCAN_FRAMES = [
+    r"""
+       LIFE SIGN SCAN
+       Padme:  ||||||||....
+       Twins:  ||||||||||||
+       Risk:   rising
+    """,
+    r"""
+       LIFE SIGN SCAN
+       Padme:  ||||||||||..
+       Twins:  ||||||||||||
+       Risk:   contained
+    """,
+]
+
+LAVA_CHASE_FRAMES = [
+    r"""
+       CATWALK A-17      >>> unstable
+       ==============================
+              \   lava surge   /
+               \______________/
+    """,
+    r"""
+       CATWALK A-17      >>> failing
+       ==========  ==========  ======
+             \  LAVA SURGE  /
+              \____________/
+    """,
+    r"""
+       CATWALK A-17      >>> jump
+       =====      =====      =====
+            \   FIRE BELOW   /
+             \______________/
+    """,
+]
+
+MASK_FORGE_FRAMES = [
+    r"""
+          [ IMPERIAL SURGICAL BAY ]
+              mask shell: open
+              breath: none
+    """,
+    r"""
+          [ IMPERIAL SURGICAL BAY ]
+              mask shell: closing
+              breath: machine
+    """,
+    r"""
+          [ IMPERIAL SURGICAL BAY ]
+              mask shell: sealed
+              breath: empire
+    """,
+]
+
+PADME_ESCAPE_FRAMES = [
+    r"""
+       NABOO YACHT // AFT RAMP
+       engines: cold
+       shields: cracked
+       droids:  scrambling
+    """,
+    r"""
+       NABOO YACHT // AFT RAMP
+       engines: igniting
+       shields: failing
+       droids:  rerouting
+    """,
+    r"""
+       NABOO YACHT // AFT RAMP
+       engines: live
+       shields: holding
+       droids:  cheering politely
+    """,
+]
+
+SET_PIECES = {
+    "senate_signal": (SENATE_SIGNAL_FRAMES, Fore.BLUE, "SENATE SIGNAL"),
+    "medical_scan": (MEDICAL_SCAN_FRAMES, Fore.GREEN, "MEDICAL SCAN"),
+    "lava_chase": (LAVA_CHASE_FRAMES, Fore.RED, "LAVA CHASE"),
+    "mask_forge": (MASK_FORGE_FRAMES, Fore.RED, "MASK FORGE"),
+    "padme_escape": (PADME_ESCAPE_FRAMES, Fore.YELLOW, "PADME ESCAPE"),
+    "saber_lock": (SABER_LOCK_FRAMES, Fore.YELLOW, "SABER LOCK"),
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # PLAYER STATE
 # Tracks everything about the player: health, force power, morality,
@@ -643,7 +915,8 @@ class PlayerState:
         bond_padme / bond_brotherhood: Relationship meters that unlock
                altered dialogue and secret endings.
         clarity: How clearly the player sees Palpatine's manipulation.
-        secrets_found / codex: Optional discovery progress for replay value.
+        secrets_found / codex / memory_shards: Optional discovery progress
+               for replay value and menu inspection.
         current_scene: ID of the scene the player is currently in.
         choices_made: Running count of total decisions (for stats screen).
     """
@@ -662,6 +935,7 @@ class PlayerState:
     clarity: int = 0
     secrets_found: int = 0
     codex: list = field(default_factory=list)
+    memory_shards: list = field(default_factory=list)
     current_scene: str = "title"
     choices_made: int = 0
 
@@ -676,8 +950,12 @@ class PlayerState:
         self.morality += amount
         if amount > 0:
             indicator = f"{Fore.CYAN}  ✦ Light side shift"
-        else:
+            audio.play_sfx_cue("light")
+        elif amount < 0:
             indicator = f"{Fore.RED}  ✦ Dark side shift"
+            audio.play_sfx_cue("dark")
+        else:
+            indicator = f"{Fore.YELLOW}  ✦ The Force remains balanced"
         if reason:
             indicator += f" — {reason}"
         print(f"{indicator}{Style.RESET_ALL}")
@@ -686,6 +964,7 @@ class PlayerState:
         """Add an item to inventory and notify the player."""
         if item not in self.inventory:
             self.inventory.append(item)
+            audio.play_sfx_cue("save")
             print(f"\n  {Fore.GREEN}+ Acquired: {Style.BRIGHT}{item}{Style.RESET_ALL}")
 
     def remove_item(self, item: str):
@@ -710,6 +989,7 @@ class PlayerState:
     def heal(self, amount: int):
         """Restore health up to the maximum."""
         self.health = min(self.max_health, self.health + amount)
+        audio.play_sfx_cue("heal")
         print(f"  {Fore.GREEN}+ Restored {amount} HP{Style.RESET_ALL}")
 
     def change_bond(self, bond_name: str, amount: int, reason: str = ""):
@@ -736,12 +1016,20 @@ class PlayerState:
             self.codex.append(entry)
             print(f"{Fore.BLUE}  Codex updated: {entry}{Style.RESET_ALL}")
 
+    def add_memory_shard(self, title: str, body: str):
+        """Record a memory shard for the in-game memory menu."""
+        if not any(isinstance(shard, dict) and shard.get("title") == title for shard in self.memory_shards):
+            self.memory_shards.append({"title": title, "body": body})
+            audio.play_sfx_cue("memory")
+            print(f"{Fore.MAGENTA}  Memory shard unlocked: {title}{Style.RESET_ALL}")
+
     def discover_secret(self, title: str, body: str):
         """Track and reveal a secret only once per run."""
         key = f"secret_{title.lower().replace(' ', '_')}"
         if not self.flags.get(key):
             self.flags[key] = True
             self.secrets_found += 1
+            audio.play_sfx_cue("secret")
             show_secret(title, body)
 
     def take_damage(self, amount: int, source: str = ""):
@@ -750,6 +1038,7 @@ class PlayerState:
         Returns True if the player is still alive.
         """
         self.health = max(0, self.health - amount)
+        audio.play_sfx_cue("damage")
         label = f" from {source}" if source else ""
         print(f"  {Fore.RED}✖ Took {amount} damage{label} "
               f"[HP: {self.health}/{self.max_health}]{Style.RESET_ALL}")
@@ -994,13 +1283,30 @@ class GameEngine:
         self.player = PlayerState()
         self.running = True
 
+    def _sync_audio_for_scene(self, scene_name: str):
+        """Pick a music mood from the scene name."""
+        if scene_name == "title":
+            audio.set_mood("title")
+        elif "duel" in scene_name or "high_ground" in scene_name or "combat" in scene_name:
+            audio.set_mood("duel")
+        elif "ending_dark" in scene_name or "ending_fall" in scene_name or "defeat" in scene_name:
+            audio.set_mood("tragedy")
+        elif "redemption" in scene_name or "rebellion" in scene_name or "miracle" in scene_name or "broken_mask" in scene_name:
+            audio.set_mood("hope")
+        elif scene_name.startswith("padme"):
+            audio.set_mood("hope" if "ending" in scene_name else "tension")
+        elif scene_name.startswith("anakin"):
+            audio.set_mood("dark")
+        else:
+            audio.set_mood("tension")
+
     # ── Main loop ──
 
     def run(self):
         """Start the game loop, dispatching to scene methods."""
         global ACTIVE_ENGINE
         ACTIVE_ENGINE = self
-        audio.play_music("song.mp3", volume=0.4)
+        audio.set_mood("title")
 
         while self.running:
             scene_method = getattr(self, f"scene_{self.player.current_scene}", None)
@@ -1008,6 +1314,7 @@ class GameEngine:
                 print(f"{Fore.RED}ERROR: Unknown scene '{self.player.current_scene}'{Style.RESET_ALL}")
                 self.running = False
                 break
+            self._sync_audio_for_scene(self.player.current_scene)
             try:
                 next_scene = scene_method()
             except LoadRequested:
@@ -1087,7 +1394,7 @@ class GameEngine:
         type_text(f"Welcome, {self.player.name}. Choose your destiny.", color=Fore.YELLOW)
         print()
         type_text(
-            "Tip: During choice prompts, you can type S to save, L to load, or Q to quit.",
+            "Tip: During choice prompts, type S to save, L to load, C for codex, M for memories, or Q to quit.",
             color=Fore.WHITE + Style.DIM,
             speed=TYPE_SPEED_FAST,
         )
@@ -1095,6 +1402,7 @@ class GameEngine:
         choice = show_choices([
             f"{Fore.RED}Anakin Skywalker{Style.RESET_ALL} — The Chosen One, consumed by rage",
             f"{Fore.CYAN}Obi-Wan Kenobi{Style.RESET_ALL} — The faithful Jedi, burdened by duty",
+            f"{Fore.MAGENTA}Padmé Amidala{Style.RESET_ALL} — The senator who can turn love into rebellion",
         ])
 
         if choice == 1:
@@ -1110,7 +1418,7 @@ class GameEngine:
                        "power the Jedi were too afraid to use.",
                        color=Fore.RED)
             return "anakin_arrival"
-        else:
+        elif choice == 2:
             self.player.character = "obiwan"
             self.player.morality = 2  # Obi-Wan starts light-aligned
             self.player.bond_padme = 1
@@ -1123,6 +1431,482 @@ class GameEngine:
                        "But the boy you trained is gone.",
                        color=Fore.CYAN)
             return "obiwan_arrival"
+        else:
+            self.player.character = "padme"
+            self.player.morality = 3
+            self.player.bond_padme = 4
+            self.player.bond_brotherhood = 1
+            self.player.clarity = 1
+            self.player.add_item("Royal Holdout Blaster")
+            self.player.add_item("Senate Cipher")
+            self.player.add_item("Japor Snippet")
+            self.player.add_codex("Padme Amidala: diplomacy under imperial collapse")
+            self.player.add_memory_shard(
+                "Queen at Fourteen",
+                "A throne room on Naboo. A girl too young for war learning that courage can wear ceremonial paint."
+            )
+            show_portrait("padme", Fore.MAGENTA)
+            type_text("You have survived invasions, assassins, votes, and war. Now the "
+                       "Republic itself is dead, and the man you love is somewhere inside "
+                       "the smoke.",
+                       color=Fore.MAGENTA)
+            return "padme_coruscant"
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  PADME PATH
+    # ══════════════════════════════════════════════════════════════════════
+
+    def scene_padme_coruscant(self):
+        """Padme begins with politics, proof, and love moving in opposite directions."""
+        clear_screen()
+        header_box("CORUSCANT — SENATE APARTMENT", "Padme's Path", Fore.MAGENTA)
+        show_portrait("padme", Fore.MAGENTA)
+
+        type_text("Obi-Wan has just left. His words remain in the room like smoke: "
+                   "Anakin killed children. Anakin serves the Sith. Anakin is on Mustafar.",
+                   color=Fore.WHITE)
+        print()
+        type_text("Your hand rests over your children. The Empire is hours old. If you "
+                   "move like a grieving wife, Palpatine wins. If you move like a queen, "
+                   "you might still save someone.",
+                   color=Fore.MAGENTA)
+
+        choice = show_choices([
+            "Fly to Mustafar alone. Anakin will listen to you.",
+            "Call Bail Organa and seed a resistance before you leave.",
+            "Use the Senate Cipher to inspect Palpatine's emergency records.",
+            "Ask Obi-Wan to come openly, not hidden."
+        ])
+
+        if choice == 1:
+            self.player.change_bond("padme", 1, "love moves faster than caution")
+            self.player.flags["padme_alone"] = True
+            type_text("No escort. No witnesses. Only the ship, your children, and a hope "
+                       "so bright it hurts to look at.",
+                       color=Fore.MAGENTA)
+            pause()
+            return "padme_mustafar_landing"
+        if choice == 2:
+            self.player.add_item("Rebellion Beacon")
+            self.player.flags["bail_network"] = True
+            self.player.add_clarity(1, "survival needs witnesses")
+            self.player.add_codex("Bail Organa: the first safe channel")
+            type_dialogue("Bail Organa", "If this is treason, Senator, then let history "
+                           "write down who made loyalty impossible.", Fore.BLUE)
+            pause()
+            return "padme_yacht_preparation"
+        if choice == 3:
+            return "padme_senate_records"
+
+        self.player.change_bond("brotherhood", 2, "you refuse to stage a betrayal")
+        self.player.flags["obiwan_openly_invited"] = True
+        type_dialogue("Obi-Wan", "If he sees me beside you, he may think the worst.",
+                       Fore.CYAN)
+        type_dialogue("Padme", "Then we will not let the worst be the only story in the room.",
+                       Fore.MAGENTA)
+        pause()
+        return "padme_yacht_preparation"
+
+    def scene_padme_senate_records(self):
+        """Padme uncovers evidence hidden inside the first hours of the Empire."""
+        play_set_piece("senate_signal", cycles=1, delay=0.12)
+        header_box("SENATE RECORDS", "The Empire leaves fingerprints", Fore.BLUE)
+
+        type_text("The Senate Cipher opens doors Palpatine forgot you helped design. "
+                   "Emergency orders, medical transfers, clone redeployments, and one "
+                   "sealed note marked: MUSTAFAR CONTINGENCY.",
+                   color=Fore.WHITE)
+        type_dialogue("Sidious Recording", "If Skywalker breaks, Kenobi will make him useful.",
+                       Fore.MAGENTA)
+
+        choice = show_choices([
+            "Download the Mustafar Contingency as evidence.",
+            "Transmit the evidence to Bail immediately.",
+            "Delete your access trail to protect Anakin from suspicion.",
+            "Read deeper, even if the system notices you."
+        ])
+
+        if choice == 1:
+            self.player.add_item("Sidious Dossier")
+            self.player.add_clarity(3, "Mustafar is a designed wound")
+            self.player.add_memory_shard(
+                "The Hidden Hand",
+                "A line of code, a timestamp, a voice. The tragedy has an author."
+            )
+        elif choice == 2:
+            self.player.add_item("Sidious Dossier")
+            self.player.add_item("Rebellion Beacon")
+            self.player.flags["bail_network"] = True
+            self.player.add_clarity(3, "truth now has a witness")
+            self.player.discover_secret(
+                "Bail Has Proof",
+                "Before Padme leaves Coruscant, a copy of Sidious's plan reaches Alderaan."
+            )
+        elif choice == 3:
+            self.player.change_bond("padme", 1, "you still protect his name")
+            self.player.add_clarity(1, "fear edits the truth")
+            type_text("The evidence vanishes from the console. The knowledge does not "
+                       "vanish from you.",
+                       color=Fore.YELLOW)
+        else:
+            self.player.add_item("Sidious Dossier")
+            self.player.add_item("Clone Override Code")
+            self.player.add_clarity(4, "you see the trap and the machinery behind it")
+            self.player.take_damage(8, "security feedback")
+            self.player.discover_secret(
+                "Clone Override",
+                "A forgotten Senate failsafe can delay one squad of troopers, once."
+            )
+
+        pause()
+        return "padme_yacht_preparation"
+
+    def scene_padme_yacht_preparation(self):
+        """Padme prepares the Naboo yacht for a rescue that may become a rebellion."""
+        clear_screen()
+        header_box("NABOO YACHT", "Preparation is a kind of courage", Fore.MAGENTA)
+
+        type_text("C-3PO worries in six million forms of panic. R2-D2 plugs into the "
+                   "ship and immediately starts arguing with the navcomputer. The launch "
+                   "window is closing.",
+                   color=Fore.WHITE)
+
+        choice = show_choices([
+            "Load med-droids and a concealed life-sign scanner.",
+            "Arm the yacht's public transmitter for a galaxy-wide broadcast.",
+            "Bring no one else into this. Fewer people means fewer targets.",
+            "Ask the droids to prepare an extraction route under fire."
+        ])
+
+        if choice == 1:
+            self.player.add_item("Med-Droid Kit")
+            self.player.flags["med_droids_loaded"] = True
+            self.player.add_codex("Naboo Medical Kit: small tools against enormous history")
+        elif choice == 2:
+            self.player.add_item("Public Transmitter")
+            self.player.flags["transmitter_armed"] = True
+            self.player.add_clarity(1, "truth needs a signal")
+        elif choice == 3:
+            self.player.flags["padme_isolated"] = True
+            self.player.change_bond("padme", 1, "you carry the danger yourself")
+            type_text("You leave with fewer safeguards and fewer people to mourn you.",
+                       color=Fore.WHITE + Style.DIM)
+        else:
+            self.player.add_item("Droid Escape Plan")
+            self.player.flags["droid_escape_ready"] = True
+            self.player.add_memory_shard(
+                "R2's Promise",
+                "A blue astromech chirps like he has already decided history will need you alive."
+            )
+
+        pause()
+        return "padme_mustafar_landing"
+
+    def scene_padme_mustafar_landing(self):
+        """Padme lands on Mustafar and reaches Anakin before the duel fully ignites."""
+        clear_screen()
+        animate_frames(MUSTAFAR_LAVA_FRAMES, Fore.MAGENTA, cycles=1, delay=0.12)
+        header_box("MUSTAFAR — LANDING PLATFORM", "Love enters the fire", Fore.MAGENTA)
+
+        type_text("Heat slams into you as the ramp lowers. Anakin turns from the control "
+                   "center doors. For half a second, he is only the boy from Tatooine, "
+                   "the pilot from Naboo, the husband who smiled when he thought no one saw.",
+                   color=Fore.WHITE)
+        show_portrait("anakin", Fore.RED)
+        type_dialogue("Anakin", "I saw your ship. I knew you would come.", Fore.RED)
+
+        choices = [
+            "Embrace him and ask him to leave with you now.",
+            "Tell him you know what happened at the Temple.",
+            "Press the Japor Snippet into his hand.",
+            "Secretly arm the Rebellion Beacon."
+        ]
+        if "Sidious Dossier" in self.player.inventory:
+            choices.insert(2, "Show him the Mustafar Contingency.")
+
+        choice = show_choices(choices)
+        showed_dossier_choice = "Sidious Dossier" in self.player.inventory and choice == 3
+
+        if choice == 1:
+            self.player.change_bond("padme", 2, "you reach for Anakin before Vader")
+            self.player.flags["padme_embraced_anakin"] = True
+            type_dialogue("Padme", "Come away with me. We can disappear before he closes "
+                           "his hand around you.", Fore.MAGENTA)
+        elif choice == 2:
+            self.player.shift_morality(1, "truth spoken while afraid")
+            self.player.add_clarity(1, "love without truth is another prison")
+            self.player.flags["named_temple_truth"] = True
+            type_dialogue("Padme", "Tell me it is a lie. Tell me Obi-Wan is wrong.",
+                           Fore.MAGENTA)
+            type_text("Anakin looks away. That is answer enough.",
+                       color=Fore.WHITE + Style.DIM)
+        elif showed_dossier_choice:
+            self.player.add_clarity(2, "Anakin hears the trap named")
+            self.player.change_bond("padme", 2, "you bring proof instead of accusation")
+            self.player.flags["anakin_heard_dossier"] = True
+            type_dialogue("Padme", "He wrote this before I arrived. Before Obi-Wan stepped "
+                           "off the ship. He planned your pain.", Fore.MAGENTA)
+        elif choice == 3 or (choice == 4 and "Sidious Dossier" in self.player.inventory):
+            self.player.change_bond("padme", 2, "a small mercy survives the fire")
+            self.player.add_memory_shard(
+                "Japor Snippet",
+                "A carved charm in a shaking hand. Proof that Anakin was once someone who gave gifts."
+            )
+            type_text("His fingers close around the old charm. The yellow in his eyes "
+                       "flickers like a candle in wind.",
+                       color=Fore.YELLOW)
+        else:
+            if "Rebellion Beacon" in self.player.inventory:
+                self.player.flags["beacon_armed"] = True
+                self.player.add_clarity(1, "witnesses are protection")
+                type_text("The beacon warms beneath your sleeve. Bail will hear what happens next.",
+                           color=Fore.BLUE)
+            else:
+                type_text("You reach for a beacon you never brought. The silence feels enormous.",
+                           color=Fore.RED)
+
+        pause()
+        return "padme_truth_confrontation"
+
+    def scene_padme_truth_confrontation(self):
+        """Padme tries to keep the confrontation from becoming Sidious's script."""
+        clear_screen()
+        header_box("THE THREE OF YOU", "A trap needs everyone in position", Fore.MAGENTA)
+
+        if self.player.flags.get("obiwan_openly_invited"):
+            type_text("Obi-Wan steps down the ramp openly, hands visible, saber unlit.",
+                       color=Fore.CYAN)
+        else:
+            type_text("Obi-Wan appears from the ship. Anakin's grief turns instantly into "
+                       "the shape Palpatine wanted.",
+                       color=Fore.WHITE)
+
+        type_dialogue("Anakin", "You brought him here to kill me.", Fore.RED)
+        type_dialogue("Padme", "No. I came here to stop anyone else from deciding who you are.",
+                       Fore.MAGENTA)
+
+        choices = [
+            "Stand physically between Anakin and Obi-Wan.",
+            "Order Obi-Wan to lower his saber and explain the Sith trap.",
+            "Broadcast the confrontation through the yacht transmitter.",
+            "Tell Anakin the children can still know his real name."
+        ]
+        choice = show_choices(choices)
+
+        if choice == 1:
+            self.player.change_bond("padme", 2, "you make yourself the shield")
+            if self.player.bond_padme >= 7 or self.player.flags.get("anakin_heard_dossier"):
+                self.player.flags["padme_choke_avoided"] = True
+                type_text("Anakin's hand rises, trembles, and falls. The moment passes. "
+                           "Not safely. But it passes.",
+                           color=Fore.YELLOW)
+            else:
+                self.player.take_damage(28, "Anakin's panic")
+                self.player.flags["padme_wounded"] = True
+        elif choice == 2:
+            self.player.change_bond("brotherhood", 2, "you force the brothers to hear each other")
+            self.player.add_clarity(1, "the script weakens when named")
+            self.player.flags["obiwan_ordered_to_explain"] = True
+            type_dialogue("Obi-Wan", "Anakin, Palpatine needs you isolated. He needs you "
+                           "to believe no one else can love you now.", Fore.CYAN)
+        elif choice == 3:
+            if "Public Transmitter" in self.player.inventory or self.player.flags.get("beacon_armed"):
+                play_set_piece("senate_signal", cycles=1, delay=0.10)
+                self.player.flags["public_broadcast_started"] = True
+                self.player.add_clarity(2, "the trap now has an audience")
+                self.player.discover_secret(
+                    "Mustafar Live",
+                    "The first public crack in the Empire is not a speech. It is a family breaking in real time."
+                )
+            else:
+                type_text("The yacht has no live channel prepared. The truth stays trapped "
+                           "on Mustafar with you.",
+                           color=Fore.RED)
+        else:
+            self.player.change_bond("padme", 3, "you offer him a future he has not ruined yet")
+            self.player.add_memory_shard(
+                "Names for the Children",
+                "Two names unspoken in the heat. Two futures waiting to learn whether their father was only a monster."
+            )
+            type_text("For the first time since you landed, Anakin looks frightened of "
+                       "something other than loss.",
+                       color=Fore.YELLOW)
+
+        if self.player.health <= 0:
+            return "padme_ending_tragedy"
+        pause()
+        return "padme_refinery_escape"
+
+    def scene_padme_refinery_escape(self):
+        """Padme survives the duel by turning the facility into leverage."""
+        play_set_piece("padme_escape", cycles=1, delay=0.12)
+        header_box("REFINERY ESCAPE", "No saber, no surrender", Fore.MAGENTA)
+
+        type_text("The duel tears away from the landing platform into the refinery. You "
+                   "cannot match a Jedi's speed, but you can read systems, people, and "
+                   "catastrophe. The facility is dying. So is the story Palpatine wrote.",
+                   color=Fore.WHITE)
+
+        choices = [
+            "Use the med-droids to stabilize yourself and the twins.",
+            "Open blast doors to slow the duel before the high ground.",
+            "Route the public broadcast through the Separatist emergency array.",
+            "Trigger coolant floods to separate Anakin from Obi-Wan."
+        ]
+        choice = show_choices(choices)
+
+        if choice == 1:
+            play_set_piece("medical_scan", cycles=1, delay=0.12)
+            if "Med-Droid Kit" in self.player.inventory:
+                self.player.heal(35)
+                self.player.flags["twins_stabilized"] = True
+                self.player.add_codex("Medical Scan: hope with a heartbeat")
+            else:
+                self.player.take_damage(12, "untreated shock")
+                type_text("You can slow your breathing, but you cannot invent medical tools.",
+                           color=Fore.RED)
+        elif choice == 2:
+            self.player.change_bond("brotherhood", 2, "you buy Obi-Wan one honest breath")
+            self.player.flags["duel_slowed"] = True
+            type_text("Blast doors slam down one by one, forcing both men to stop, look, "
+                       "and remember they are not alone.",
+                       color=Fore.CYAN)
+        elif choice == 3:
+            play_set_piece("senate_signal", cycles=1, delay=0.10)
+            if "Sidious Dossier" in self.player.inventory or self.player.flags.get("public_broadcast_started"):
+                self.player.flags["proof_broadcast"] = True
+                self.player.add_clarity(2, "truth outruns the Empire")
+                self.player.add_memory_shard(
+                    "The First Broadcast",
+                    "A queen's voice crossing static while a new Empire tries to become inevitable."
+                )
+            else:
+                self.player.flags["raw_broadcast"] = True
+                type_text("You have no proof, only your voice. Sometimes that is enough "
+                           "to start a question.",
+                           color=Fore.YELLOW)
+        else:
+            self.player.shift_morality(1, "nonlethal force under pressure")
+            self.player.flags["coolant_separation"] = True
+            self.player.take_damage(10, "steam burst")
+            type_text("White coolant floods the lower gantry. The duel breaks apart in "
+                       "a roar of steam.",
+                       color=Fore.WHITE)
+
+        if self.player.health <= 0:
+            return "padme_ending_tragedy"
+        pause()
+        return "padme_final_broadcast"
+
+    def scene_padme_final_broadcast(self):
+        """Padme decides what kind of future can survive Mustafar."""
+        clear_screen()
+        header_box("THE FUTURE CHOOSES A WITNESS", "Padme's final move", Fore.MAGENTA)
+
+        type_text("The yacht shakes as Mustafar collapses behind you. Obi-Wan calls from "
+                   "one channel. Bail from another. Anakin's breathing comes through a "
+                   "third, ragged and human and terrifyingly close to silence.",
+                   color=Fore.WHITE)
+
+        choice = show_choices([
+            "Expose Palpatine through Bail's network and ignite the first rebellion.",
+            "Spend every resource saving Anakin alive and accountable.",
+            "Disappear with the children; let the galaxy believe Padme died.",
+            "Seize the Separatist emergency array and become the Empire's public enemy."
+        ])
+
+        if choice == 1:
+            if self.player.flags.get("proof_broadcast") and self.player.flags.get("bail_network"):
+                return "padme_ending_rebellion"
+            type_text("The network is too thin or the proof too incomplete. The signal "
+                       "sparks, but it does not yet catch.",
+                       color=Fore.YELLOW)
+            return "padme_ending_hidden_flame"
+        if choice == 2:
+            if (self.player.bond_padme >= 8 and self.player.clarity >= 5 and
+                    (self.player.flags.get("coolant_separation") or self.player.flags.get("duel_slowed"))):
+                return "padme_ending_living_anakin"
+            type_text("You try to save the man beneath the monster, but Mustafar has taken "
+                       "too much and left too little time.",
+                       color=Fore.RED)
+            return "padme_ending_hidden_flame"
+        if choice == 3:
+            return "padme_ending_hidden_flame"
+        return "padme_ending_queen_of_ashes"
+
+    def scene_padme_ending_rebellion(self):
+        """Padme survives and turns proof into organized resistance."""
+        clear_screen()
+        print(f"{Fore.YELLOW}{ENDING_ART_REDEMPTION}{Style.RESET_ALL}")
+        play_set_piece("senate_signal", cycles=1, delay=0.10)
+        type_text("Bail's network catches your signal, then multiplies it. Senators who "
+                   "were ready to kneel hear Sidious's own contingency. Clone captains "
+                   "hear the word 'trap' and hesitate for the first time all day.",
+                   color=Fore.WHITE)
+        print()
+        type_dialogue("Padme", "This is not the end of the Republic. This is the first "
+                       "record of its murder.", Fore.MAGENTA)
+        type_text("The Empire still rises. But now it rises in public, bleeding secrets.",
+                   color=Fore.YELLOW + Style.BRIGHT)
+        self._show_stats("PADME ENDING — THE REBELLION HAS A VOICE")
+        return None
+
+    def scene_padme_ending_living_anakin(self):
+        """Best Padme ending: Anakin lives, exposed and unmasked."""
+        clear_screen()
+        print(f"{Fore.CYAN}{ENDING_ART_REDEMPTION}{Style.RESET_ALL}")
+        play_set_piece("medical_scan", cycles=1, delay=0.12)
+        type_text("The med-droids keep Anakin alive without sealing him inside the mask "
+                   "Sidious prepared. Obi-Wan stands guard. Bail takes the proof. You sit "
+                   "between all of them, exhausted, furious, alive.",
+                   color=Fore.WHITE)
+        print()
+        type_dialogue("Anakin", "What am I now?", Fore.RED)
+        type_dialogue("Padme", "Answerable.", Fore.MAGENTA)
+        type_text("It is not forgiveness. It is not peace. It is something harder: a future "
+                   "where the truth survives long enough to demand justice.",
+                   color=Fore.YELLOW + Style.BRIGHT)
+        self._show_stats("SECRET PADME ENDING — ANSWERABLE")
+        return None
+
+    def scene_padme_ending_hidden_flame(self):
+        """Padme survives in hiding and becomes the rebellion's protected center."""
+        clear_screen()
+        print(f"{Fore.CYAN}{ENDING_ART_LIGHT}{Style.RESET_ALL}")
+        type_text("The galaxy believes Padme Amidala died of grief. The galaxy is wrong.",
+                   color=Fore.WHITE)
+        print()
+        type_text("On a moon with no monuments, you hold your children and build a rebellion "
+                   "that begins as a lullaby, a cipher, and one unbroken witness.",
+                   color=Fore.CYAN)
+        self._show_stats("PADME ENDING — THE HIDDEN FLAME")
+        return None
+
+    def scene_padme_ending_queen_of_ashes(self):
+        """Darker Padme ending: public resistance by ruthless political force."""
+        clear_screen()
+        print(f"{Fore.RED}{JEDI_BEACON_ART}{Style.RESET_ALL}")
+        type_text("You take the Separatist emergency array and make yourself impossible "
+                   "to quietly erase. Palpatine brands you traitor before you finish the "
+                   "first sentence. You smile because he had to answer.",
+                   color=Fore.YELLOW)
+        print()
+        type_text("The Rebellion that follows you is not gentle. It is brilliant, hunted, "
+                   "and willing to burn imperial lies before they harden into law.",
+                   color=Fore.RED + Style.BRIGHT)
+        self._show_stats("PADME ENDING — QUEEN OF ASHES")
+        return None
+
+    def scene_padme_ending_tragedy(self):
+        """Padme falls on Mustafar."""
+        clear_screen()
+        header_box("TRAGEDY", "The witness falls", Fore.RED)
+        type_text("Mustafar takes your breath, then your voice. Somewhere beyond the smoke, "
+                   "men with lightsabers decide the shape of history without the person "
+                   "who saw most clearly what it cost.",
+                   color=Fore.RED)
+        self._show_stats("PADME ENDING — THE SILENCED WITNESS")
+        return None
 
     # ══════════════════════════════════════════════════════════════════════
     #  ANAKIN PATH
@@ -1264,6 +2048,10 @@ class GameEngine:
             self.player.flags["reached_for_padme"] = True
 
         self.player.add_codex("Vision Shards: futures are warnings, not verdicts")
+        self.player.add_memory_shard(
+            "The Mask Not Yet Made",
+            "Black lenses, borrowed breath, and a future still soft enough to scar differently."
+        )
         pause()
         return "anakin_padme"
 
@@ -1619,8 +2407,8 @@ class GameEngine:
 
     def scene_anakin_mining_platform_collapse(self):
         """A cinematic aftermath beat before Anakin decides Obi-Wan's fate."""
-        cinematic_beat("THE FACILITY BREAKS", "", Fore.RED,
-                       "Victory is not the same as control")
+        play_set_piece("lava_chase", cycles=1, delay=0.12)
+        header_box("THE FACILITY BREAKS", "Victory is not the same as control", Fore.RED)
 
         type_text("Obi-Wan falls hard against a control rail. The refinery answers with "
                    "a scream of tortured metal. Lava pumps rupture. Catwalks twist. "
@@ -1712,6 +2500,7 @@ class GameEngine:
         """Ending: Anakin fully embraces the dark side."""
         clear_screen()
         print(f"{Fore.RED}{ENDING_ART_DARK}{Style.RESET_ALL}")
+        play_set_piece("mask_forge", cycles=1, delay=0.16)
         type_text("You stand alone on Mustafar, surrounded by fire and death. "
                    "Obi-Wan is gone. Padmé is gone. The boy from Tatooine is gone.",
                    color=Fore.RED)
@@ -1745,6 +2534,7 @@ class GameEngine:
             type_text("You leap. His blade flashes. You feel your legs leave you, then "
                        "the burning. Always the burning.",
                        color=Fore.RED)
+            play_set_piece("mask_forge", cycles=1, delay=0.16)
             print()
             type_dialogue("Obi-Wan", "You were the Chosen One! It was said that you would "
                            "destroy the Sith, not join them!", Fore.CYAN)
@@ -2061,8 +2851,8 @@ class GameEngine:
 
     def scene_obiwan_crumbling_facility(self):
         """Obi-Wan must choose what to save as the facility collapses."""
-        cinematic_beat("REFINERY COLLAPSE", "", Fore.CYAN,
-                       "The duel spills into disaster")
+        play_set_piece("lava_chase", cycles=1, delay=0.12)
+        header_box("REFINERY COLLAPSE", "The duel spills into disaster", Fore.CYAN)
 
         type_text("Your final exchange shatters the control gantry. Magma pressure alarms "
                    "howl across the facility. Below, Padmé's ship trembles. Above, Anakin "
@@ -2316,6 +3106,7 @@ class GameEngine:
             ("Choices Made", str(self.player.choices_made)),
             ("Items Found", str(len(self.player.inventory))),
             ("Secrets Found", str(self.player.secrets_found)),
+            ("Memory Shards", str(len(self.player.memory_shards))),
         ]
 
         for label, value in stats:
