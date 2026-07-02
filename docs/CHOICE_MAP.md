@@ -344,25 +344,6 @@ flowchart TD
 | `bail_warned` | Obi-Wan sends a coded warning or later proof to Bail |
 | `force_called_anakin` | Obi-Wan slows down during the collapse and speaks Anakin's name through the Force |
 | `heard_quigon` | Obi-Wan listens for Anakin beneath Vader during the Force Echo |
-
-## README Embed Snippet
-
-For a compact README section, this link plus route hub is usually enough:
-
-````markdown
-## Choice & Ending Map
-
-The full spoiler-heavy route map is available in [docs/CHOICE_MAP.md](docs/CHOICE_MAP.md).
-
-```mermaid
-flowchart LR
-    Start["Start"] --> Choice["Choose Destiny"]
-    Choice --> Anakin["Anakin Route"]
-    Choice --> ObiWan["Obi-Wan Route"]
-    Choice --> Padme["Padme Route"]
-    Anakin --> AEnds["7 Endings"]
-    ObiWan --> OEnds["5 Endings"]
-    Padme --> PEnds["5 Endings"]
     AEnds --> Total["17 Total Endings"]
     OEnds --> Total
     PEnds --> Total
