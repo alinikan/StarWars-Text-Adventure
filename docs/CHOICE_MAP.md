@@ -344,8 +344,3 @@ flowchart TD
 | `bail_warned` | Obi-Wan sends a coded warning or later proof to Bail |
 | `force_called_anakin` | Obi-Wan slows down during the collapse and speaks Anakin's name through the Force |
 | `heard_quigon` | Obi-Wan listens for Anakin beneath Vader during the Force Echo |
-    AEnds --> Total["17 Total Endings"]
-    OEnds --> Total
-    PEnds --> Total
-```
-````
