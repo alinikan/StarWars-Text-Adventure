@@ -16,6 +16,10 @@ Whether you play as a fallen hero on the edge of total corruption or as a Jedi t
 - **Turn-based combat** with attacks, defense, Force abilities, critical hits, and item-based actions
 - **Inventory system** with route-specific collectibles and usable combat items
 - **Multiple endings**, including canon-inspired and non-canon “what if?” outcomes
+- **Secret plot web** involving Sidious’s Mustafar contingency, hidden recordings, Force visions, and alternate rebellion paths
+- **Relationship meters** for Padmé and the Anakin/Obi-Wan brotherhood, affecting dialogue, combat pressure, and secret endings
+- **Clarity and codex systems** that track how deeply the player understands the trap behind the duel
+- **Terminal animations and pixel-style portraits** for lava flows, saber locks, holocrons, transmissions, and key characters
 - **Atmospheric terminal UI** with typewriter text, colored dialogue, boxed scene headers, and ASCII art
 - **Audio support** through `pygame`, with graceful fallback if audio is unavailable
 - **Save/load groundwork** using JSON-based player state data
@@ -32,6 +36,9 @@ Walk the line between love, rage, ambition, and regret.
 - resist or embrace the dark side
 - duel Obi-Wan with different emotional states affecting the outcome
 - unlock redemption, exile, domination, or tragedy
+- uncover Sidious’s hidden contingency for Mustafar
+- spare, exploit, or destroy K-4S, a damaged tactical droid whose fate can matter later
+- trigger secret rebellion outcomes by combining trust, proof, and clarity
 
 ### Play as Obi-Wan
 Take the role of a Jedi trying to stop catastrophe without giving up hope.
@@ -41,6 +48,9 @@ Take the role of a Jedi trying to stop catastrophe without giving up hope.
 - appeal to Anakin’s remaining goodness
 - fight through the duel from Obi-Wan’s perspective
 - pursue duty, mercy, sacrifice, or a miracle outcome
+- hear a Force echo from Qui-Gon that reframes the duel as a Sith trap
+- warn Bail Organa, stabilize Padmé, or call to Anakin through the Force
+- unlock the secret “Broken Mask” ending by refusing Sidious’s script
 
 ---
 
@@ -54,6 +64,7 @@ This is no longer a simple one-path text adventure. The current script contains:
 - optional exploration scenes
 - hidden story branches
 - multiple route-dependent endings
+- post-duel collapse scenes where earlier choices return as consequences
 
 ### Morality and alignment
 The player has a morality score that shifts based on decisions.
@@ -64,6 +75,15 @@ The player has a morality score that shifts based on decisions.
 
 Morality affects both presentation and gameplay. In some sections it changes the tone of scenes, opens alternate paths, or influences combat flavor and encounter balance.
 
+### Relationship, clarity, and secrets
+The expanded version adds run-long story memory.
+
+- **Padmé Bond** tracks whether Anakin/Obi-Wan protects, trusts, or harms Padmé
+- **Brotherhood Bond** tracks the emotional bridge between Anakin and Obi-Wan
+- **Clarity** measures how clearly the player sees Sidious’s manipulation
+- **Secrets Found** tracks hidden discoveries such as K-4S surviving, Bail being warned, and Sidious’s Kenobi contingency
+- **Codex entries** summarize major discoveries and encourage replay
+
 ### Turn-based combat
 The duel sequences use a structured combat loop with player and enemy stats.
 
@@ -73,12 +93,17 @@ Combat actions currently include:
 - **Defend**
 - **Force Push**
 - **Force Heal**
+- **Center Yourself**
+- **Use Bacta Patch** *(when available)*
+- **Fire Emergency Flare** *(when available)*
 - **Throw Thermal Detonator** *(when available)*
 
 Combat also includes:
 
 - randomized damage ranges
 - critical hits
+- stamina pressure
+- enemy defense
 - Force power costs
 - enemy dialogue during battle
 - defensive damage reduction
@@ -94,6 +119,10 @@ Examples present in the code include:
 - **Thermal Detonator**
 - **Bacta Patch**
 - **Emergency Flare**
+- **Sidious Recording**
+- **Droid Transponder**
+- **Sabotage Spike**
+- **Medpac Beacon**
 
 ### Terminal presentation
 The game is designed to feel dramatic in the command line.
@@ -104,6 +133,8 @@ It currently includes:
 - colored scene text and dialogue using `colorama`
 - centered titles and boxed chapter headers
 - ASCII art for key moments and endings
+- animated ASCII frames for lava, saber clashes, visions, and transmissions
+- pixel-style character portraits
 - a compact player HUD during gameplay
 
 ### Audio engine
@@ -120,7 +151,7 @@ Current behavior in the code:
 
 ## Endings Currently in the Code
 
-The project includes **10 ending scenes** across both routes.
+The project includes **12 ending scenes** across both routes.
 
 ### Anakin endings
 1. **The Dark Lord Rises**
@@ -129,12 +160,14 @@ The project includes **10 ending scenes** across both routes.
 4. **Exile — Neither Jedi Nor Sith**
 5. **The Empty Throne**
 6. **The Grey Path — A New Order**
+7. **Secret Ending — The First Rebellion**
 
 ### Obi-Wan endings
 1. **The Faithful Jedi — Duty Fulfilled**
 2. **The Jedi Falls — Darkness Reigns**
 3. **The Miracle — Brothers Reunited**
 4. **The Long Road — Mercy Endures**
+5. **Secret Ending — The Broken Mask**
 
 ---
 
@@ -154,7 +187,7 @@ Clone the repository and install the required dependencies:
 ```bash
 git clone <your-repo-url>
 cd StarWars-Text-Adventure
-pip install colorama pygame
+pip install -r requirements.txt
 ```
 
 ---
@@ -177,8 +210,10 @@ python3 main.py
 
 ```text
 StarWars-Text-Adventure/
+├── EXPANSION_IDEAS.md        # next-step design roadmap
 ├── main.py
 ├── README.md
+├── requirements.txt
 ├── song.mp3                  # optional
 └── duel_of_fates_save.json   # generated when applicable
 ```
@@ -186,7 +221,8 @@ StarWars-Text-Adventure/
 ### Notes
 - `song.mp3` is optional
 - if no audio file is present, the game should still run normally
-- the save file is JSON-based and only appears when save data exists
+- the save file is JSON-based, generated at runtime, and ignored by Git
+- set `DUEL_OF_FATES_FAST=1` to skip typing/animation delays while testing
 
 ---
 

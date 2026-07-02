@@ -64,3 +64,6 @@ docs/_build/
 
 # Python cache
 __pycache__/
+
+# Runtime save data
+duel_of_fates_save.json

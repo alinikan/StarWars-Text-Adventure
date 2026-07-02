@@ -12,9 +12,10 @@
 ║    • Morality system that tracks light/dark alignment                      ║
 ║    • Turn-based combat with Force powers and stamina management            ║
 ║    • Inventory system with collectible items                               ║
+║    • Relationship, clarity, codex, and secret-discovery systems            ║
 ║    • Dynamic narrative that reacts to your choices                         ║
 ║    • Multiple endings (including secret paths)                             ║
-║    • Atmospheric typing effects and rich terminal UI                       ║
+║    • Atmospheric typing effects, animations, and pixel portraits           ║
 ║    • Autosave and manual save/load support                                 ║
 ║                                                                            ║
 ║  Requirements: Python 3.8+, colorama, pygame                               ║
@@ -49,9 +50,19 @@ TERMINAL_WIDTH = 70
 # Typing speed: seconds per character for the typewriter effect
 TYPE_SPEED = 0.02
 TYPE_SPEED_FAST = 0.008
+ANIMATION_DELAY = 0.08
+
+# Set DUEL_OF_FATES_FAST=1 to skip typewriter/animation delays during testing.
+FAST_MODE = os.environ.get("DUEL_OF_FATES_FAST", "").lower() in {"1", "true", "yes", "on"}
 
 # Save file location
 SAVE_FILE = "duel_of_fates_save.json"
+
+
+def sleep_scaled(seconds: float):
+    """Sleep unless fast mode is enabled."""
+    if not FAST_MODE:
+        time.sleep(seconds)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # AUDIO ENGINE
@@ -147,13 +158,13 @@ def type_text(text: str, speed: float = TYPE_SPEED, color: str = ""):
         sys.stdout.write(f"{color}{char}")
         sys.stdout.flush()
         if char in ".!?":
-            time.sleep(speed * 8)  # Pause longer at sentence boundaries
+            sleep_scaled(speed * 8)  # Pause longer at sentence boundaries
         elif char == ",":
-            time.sleep(speed * 4)
+            sleep_scaled(speed * 4)
         elif char == "\n":
-            time.sleep(speed * 2)
+            sleep_scaled(speed * 2)
         else:
-            time.sleep(speed)
+            sleep_scaled(speed)
     print(Style.RESET_ALL)
 
 
@@ -177,7 +188,7 @@ def type_dialogue(speaker: str, text: str, color: str = Fore.WHITE):
     for char in wrapped:
         sys.stdout.write(f"{Fore.WHITE}{char}")
         sys.stdout.flush()
-        time.sleep(TYPE_SPEED_FAST)
+        sleep_scaled(TYPE_SPEED_FAST)
     print(Style.RESET_ALL)
 
 
@@ -231,6 +242,10 @@ def status_bar(player: "PlayerState"):
     print(f"│ {hp_color}HP [{hp_bar}] {player.health}/{player.max_health}"
           f"  {Fore.BLUE}FP [{fp_bar}] {player.force_power}/{player.max_force}"
           f"  {moral_label}{Style.RESET_ALL}{Style.DIM}")
+    print(f"│ {Fore.GREEN}STA {player.stamina:>3}/100"
+          f"  {Fore.MAGENTA}Clarity {getattr(player, 'clarity', 0):>2}"
+          f"  {Fore.YELLOW}Secrets {getattr(player, 'secrets_found', 0):>2}"
+          f"{Style.RESET_ALL}{Style.DIM}")
     if player.inventory:
         items = ", ".join(player.inventory)
         print(f"{Style.DIM}│ {Fore.MAGENTA}Inventory: {items}{Style.RESET_ALL}{Style.DIM}")
@@ -319,6 +334,49 @@ def pause(prompt: str = "Press Enter to continue..."):
     input(f"\n  {Fore.WHITE}{Style.DIM}{prompt}{Style.RESET_ALL}")
 
 
+def animate_frames(frames: list[str], color: str = Fore.WHITE,
+                   cycles: int = 1, delay: float = ANIMATION_DELAY,
+                   clear_between: bool = True):
+    """Render simple terminal animation from ASCII frame strings."""
+    if not frames:
+        return
+    if FAST_MODE or len(frames) == 1:
+        print(f"{color}{frames[-1]}{Style.RESET_ALL}")
+        return
+
+    for _ in range(cycles):
+        for frame in frames:
+            if clear_between:
+                clear_screen()
+            print(f"{color}{frame}{Style.RESET_ALL}")
+            sleep_scaled(delay)
+
+
+def cinematic_beat(title: str, art: str = "", color: str = Fore.YELLOW,
+                   subtitle: str = ""):
+    """Show a short cinematic title card with optional art."""
+    clear_screen()
+    if art:
+        print(f"{color}{art}{Style.RESET_ALL}")
+    header_box(title, subtitle, color)
+
+
+def show_portrait(name: str, color: str = Fore.WHITE):
+    """Display a small pixel-style character portrait if one exists."""
+    portrait_art = CHARACTER_PORTRAITS.get(name.lower())
+    if portrait_art:
+        print(f"{color}{portrait_art}{Style.RESET_ALL}")
+
+
+def show_secret(title: str, body: str):
+    """Display a dramatic secret discovery card."""
+    print()
+    horizontal_rule("░", Fore.MAGENTA)
+    centered(f"SECRET: {title}", Fore.MAGENTA + Style.BRIGHT)
+    horizontal_rule("░", Fore.MAGENTA)
+    type_text(body, color=Fore.WHITE + Style.DIM, speed=TYPE_SPEED_FAST)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # ASCII ART
 # Large-format text art for the title screen and key dramatic moments.
@@ -382,6 +440,183 @@ ENDING_ART_REDEMPTION = r"""
         ╚═══════════════════════════════════╝
 """
 
+HOLOCRON_ART = r"""
+                 .-.
+              .-'   '-.
+           .-'  .- -.  '-.
+          /   .'  _  '.   \
+         ;   /   (_)   \   ;
+         |  ;  .-'''-.  ;  |
+         ;   \  '---'  /   ;
+          \   '.     .'   /
+           '-.  '---'  .-'
+              '-.   .-'
+                 '-'
+"""
+
+PALPATINE_HOLO_ART = r"""
+             ______________________
+            / .------------------. \
+           / /  ////  ////  //// \ \
+          | |     HOLO TRANSMIT    | |
+          | |       _.-''''-._     | |
+          | |     .'  .--.    '.   | |
+          | |    /   (    )     \  | |
+          | |    |    '--'      |  | |
+           \ \    '._        _.'  / /
+            \ '------------------' /
+             '--------------------'
+"""
+
+DROID_ART = r"""
+              .----.
+             / .--. \
+            | |K4S| |
+            | '--' |
+         ___|  __  |___
+        / _ \_/  \_/_  \
+       /_/ \___/\___/ \_\
+           /_/    \_\
+"""
+
+JEDI_BEACON_ART = r"""
+              \  |  /
+            '.  \|/  .'
+          ----  ( )  ----
+            .'  /|\  '.
+              /  |  \
+           BEACON FREQUENCY
+"""
+
+MEMORY_SHARD_ART = r"""
+             /\
+            /  \
+           / /\ \
+          / /  \ \
+         /_/____\_\
+           \    /
+            \  /
+             \/
+"""
+
+CHARACTER_PORTRAITS = {
+    "anakin": r"""
+          .------.
+         /  _  _  \
+        |  (o)(o)  |
+        |    __    |
+        |  .'  '.  |
+         \  `--'  /
+          '------'
+        ANAKIN SKYWALKER
+    """,
+    "obi-wan": r"""
+          .------.
+         /  -  -  \
+        |  (o)(o)  |
+        |    /\    |
+        |  \____/  |
+         \  ____  /
+          '------'
+         OBI-WAN KENOBI
+    """,
+    "padme": r"""
+          .------.
+         /  .--.  \
+        |  (o  o)  |
+        |    --    |
+        |  .____.  |
+         \        /
+          '------'
+             PADME
+    """,
+    "palpatine": r"""
+          .------.
+         /  .--.  \
+        |  / .. \  |
+        |  \_--_/  |
+        |   /__\   |
+         \  DARK  /
+          '------'
+          SIDIOUS
+    """,
+    "qui-gon": r"""
+          .------.
+         /  ~  ~  \
+        |  (o)(o)  |
+        |    __    |
+        |  \____/  |
+         \  FORCE /
+          '------'
+          QUI-GON
+    """,
+    "k-4s": DROID_ART,
+}
+
+MUSTAFAR_LAVA_FRAMES = [
+    r"""
+      ~~~~~~~~^^^^~~~~~~^^^^~~~~~~~~
+    ~~  LAVA   ~~  ASH   ~~  LAVA  ~~
+      ^^^^~~~~~~^^^^~~~~~~^^^^~~~~
+    """,
+    r"""
+      ^^^^~~~~~~^^^^~~~~~~^^^^~~~~
+    ~~  ASH    ~~  LAVA  ~~  ASH   ~~
+      ~~~~~~~~^^^^~~~~~~^^^^~~~~~~~~
+    """,
+]
+
+SABER_LOCK_FRAMES = [
+    r"""
+             blue hum          blue hum
+                 \              /
+                  \            /
+                   \          /
+                    \        /
+                     \      /
+                      \    /
+                       \  /
+                        \/
+    """,
+    r"""
+             blue hum  >>>><<<<  blue hum
+                 \        XX        /
+                  \      XXXX      /
+                   \      XX      /
+                    \            /
+                     \          /
+                      \        /
+    """,
+    LIGHTSABER_CLASH,
+]
+
+FORCE_VISION_FRAMES = [
+    r"""
+              . . . . .
+           .             .
+         .    A MASK       .
+         .   NOT YET       .
+           .             .
+              . . . . .
+    """,
+    r"""
+              . . . . .
+           .             .
+         .   A CHILD       .
+         .   HIDDEN        .
+           .             .
+              . . . . .
+    """,
+    r"""
+              . . . . .
+           .             .
+         .   A MASTER      .
+         .   AFRAID        .
+           .             .
+              . . . . .
+    """,
+]
+
 # ──────────────────────────────────────────────────────────────────────────────
 # PLAYER STATE
 # Tracks everything about the player: health, force power, morality,
@@ -405,6 +640,10 @@ class PlayerState:
         inventory: List of item names the player is carrying.
         flags: Arbitrary key→value store for narrative state tracking
                (e.g., {"spared_clone": True, "found_holocron": True}).
+        bond_padme / bond_brotherhood: Relationship meters that unlock
+               altered dialogue and secret endings.
+        clarity: How clearly the player sees Palpatine's manipulation.
+        secrets_found / codex: Optional discovery progress for replay value.
         current_scene: ID of the scene the player is currently in.
         choices_made: Running count of total decisions (for stats screen).
     """
@@ -418,6 +657,11 @@ class PlayerState:
     stamina: int = 100
     inventory: list = field(default_factory=list)
     flags: dict = field(default_factory=dict)
+    bond_padme: int = 0
+    bond_brotherhood: int = 0
+    clarity: int = 0
+    secrets_found: int = 0
+    codex: list = field(default_factory=list)
     current_scene: str = "title"
     choices_made: int = 0
 
@@ -468,6 +712,38 @@ class PlayerState:
         self.health = min(self.max_health, self.health + amount)
         print(f"  {Fore.GREEN}+ Restored {amount} HP{Style.RESET_ALL}")
 
+    def change_bond(self, bond_name: str, amount: int, reason: str = ""):
+        """Adjust one of the relationship meters and show the change."""
+        attr = f"bond_{bond_name}"
+        if not hasattr(self, attr):
+            return
+        setattr(self, attr, getattr(self, attr) + amount)
+        label = bond_name.replace("_", " ").title()
+        color = Fore.CYAN if amount >= 0 else Fore.RED
+        sign = "+" if amount >= 0 else ""
+        suffix = f" — {reason}" if reason else ""
+        print(f"{color}  {label} bond {sign}{amount}{suffix}{Style.RESET_ALL}")
+
+    def add_clarity(self, amount: int, reason: str = ""):
+        """Increase insight into the deeper plot."""
+        self.clarity = max(0, self.clarity + amount)
+        suffix = f" — {reason}" if reason else ""
+        print(f"{Fore.MAGENTA}  ✦ Clarity +{amount}{suffix}{Style.RESET_ALL}")
+
+    def add_codex(self, entry: str):
+        """Record an optional lore/discovery entry."""
+        if entry not in self.codex:
+            self.codex.append(entry)
+            print(f"{Fore.BLUE}  Codex updated: {entry}{Style.RESET_ALL}")
+
+    def discover_secret(self, title: str, body: str):
+        """Track and reveal a secret only once per run."""
+        key = f"secret_{title.lower().replace(' ', '_')}"
+        if not self.flags.get(key):
+            self.flags[key] = True
+            self.secrets_found += 1
+            show_secret(title, body)
+
     def take_damage(self, amount: int, source: str = ""):
         """
         Apply damage to the player and display it.
@@ -517,6 +793,7 @@ def run_combat(player: PlayerState, enemy: Enemy) -> str:
     header_box("⚔  COMBAT  ⚔", f"vs. {enemy.name}", Fore.RED)
     turn = 0
     defending = False
+    enemy_stunned = False
 
     while player.health > 0 and enemy.health > 0:
         turn += 1
@@ -534,50 +811,88 @@ def run_combat(player: PlayerState, enemy: Enemy) -> str:
             type_dialogue(enemy.name, line, Fore.RED)
 
         # ── Player turn ──
-        actions = ["⚔ Strike", "🛡 Defend", "✦ Force Push (20 FP)", "✦ Force Heal (30 FP)"]
+        action_map = [
+            ("strike", "⚔ Strike"),
+            ("defend", "🛡 Defend"),
+            ("force_push", "✦ Force Push (20 FP)"),
+            ("force_heal", "✦ Force Heal (30 FP)"),
+            ("center", "◎ Center Yourself (+stamina/+FP)"),
+        ]
+        if "Bacta Patch" in player.inventory:
+            action_map.append(("bacta", "✚ Use Bacta Patch"))
         if "Thermal Detonator" in player.inventory:
-            actions.append("💣 Throw Thermal Detonator")
+            action_map.append(("detonator", "💣 Throw Thermal Detonator"))
+        if "Emergency Flare" in player.inventory:
+            action_map.append(("flare", "☄ Fire Emergency Flare"))
 
-        choice = show_choices(actions)
+        choice = show_choices([label for _, label in action_map])
+        action = action_map[choice - 1][0]
 
-        if choice == 1:  # Strike
-            # Damage calculation with a small random spread
-            base_dmg = random.randint(12, 22)
+        if action == "strike":
+            stamina_factor = 1.0 if player.stamina >= 25 else 0.72
+            base_dmg = int(random.randint(16, 28) * stamina_factor)
+            base_dmg = max(4, base_dmg - max(0, enemy.defense // 3))
+            player.stamina = max(0, player.stamina - 12)
+
             if defending:
                 base_dmg = int(base_dmg * 0.6)  # Reduced damage while defensive
                 defending = False
-            crit = random.random() < 0.15  # 15% crit chance
+
+            crit_chance = 0.15 + min(0.10, player.clarity * 0.01)
+            crit = random.random() < crit_chance
             if crit:
                 base_dmg = int(base_dmg * 1.8)
                 print(f"  {Fore.YELLOW}{Style.BRIGHT}★ CRITICAL HIT!{Style.RESET_ALL}")
             enemy.health = max(0, enemy.health - base_dmg)
             print(f"  {Fore.GREEN}You strike for {base_dmg} damage!{Style.RESET_ALL}")
+            if player.stamina < 20:
+                print(f"  {Fore.YELLOW}Your arms burn with fatigue. Center yourself soon.{Style.RESET_ALL}")
 
-        elif choice == 2:  # Defend
+        elif action == "defend":
             defending = True
-            player.stamina = min(100, player.stamina + 15)
-            print(f"  {Fore.BLUE}You brace for the next attack. (+15 stamina){Style.RESET_ALL}")
+            player.stamina = min(100, player.stamina + 20)
+            print(f"  {Fore.BLUE}You brace for the next attack. (+20 stamina){Style.RESET_ALL}")
 
-        elif choice == 3:  # Force Push
+        elif action == "force_push":
             if player.use_force(20):
-                dmg = random.randint(25, 40)
+                dmg = max(10, random.randint(28, 46) - enemy.defense // 4)
                 enemy.health = max(0, enemy.health - dmg)
+                player.stamina = max(0, player.stamina - 8)
                 print(f"  {Fore.CYAN}The Force surges through you — {dmg} damage!{Style.RESET_ALL}")
                 # Small chance to stun (enemy skips next attack)
-                if random.random() < 0.3:
+                if random.random() < 0.35:
                     print(f"  {Fore.CYAN}{enemy.name} staggers, stunned!{Style.RESET_ALL}")
-                    continue  # Skip enemy turn
+                    enemy_stunned = True
 
-        elif choice == 4:  # Force Heal
+        elif action == "force_heal":
             if player.use_force(30):
                 heal_amt = random.randint(20, 35)
                 player.heal(heal_amt)
+                player.stamina = min(100, player.stamina + 10)
 
-        elif choice == 5:  # Thermal Detonator
+        elif action == "center":
+            player.stamina = min(100, player.stamina + 28)
+            player.force_power = min(player.max_force, player.force_power + 12)
+            if random.random() < 0.35:
+                player.add_clarity(1, "you read the rhythm of the duel")
+            print(f"  {Fore.MAGENTA}You breathe through the heat and reclaim your balance.{Style.RESET_ALL}")
+
+        elif action == "bacta":
+            player.remove_item("Bacta Patch")
+            player.heal(random.randint(32, 48))
+            player.stamina = min(100, player.stamina + 12)
+
+        elif action == "detonator":
             player.remove_item("Thermal Detonator")
             dmg = random.randint(40, 60)
             enemy.health = max(0, enemy.health - dmg)
             print(f"  {Fore.YELLOW}{Style.BRIGHT}💥 BOOM! {dmg} damage!{Style.RESET_ALL}")
+            enemy_stunned = True
+
+        elif action == "flare":
+            player.remove_item("Emergency Flare")
+            print(f"  {Fore.YELLOW}{Style.BRIGHT}A white-hot flare splits the ash cloud!{Style.RESET_ALL}")
+            enemy_stunned = True
 
         # ── Check if enemy is defeated ──
         if enemy.health <= 0:
@@ -586,7 +901,12 @@ def run_combat(player: PlayerState, enemy: Enemy) -> str:
             return "victory"
 
         # ── Enemy turn ──
-        time.sleep(0.5)
+        sleep_scaled(0.5)
+        if enemy_stunned:
+            enemy_stunned = False
+            print(f"  {Fore.CYAN}{enemy.name} loses the rhythm of the duel and cannot answer.{Style.RESET_ALL}")
+            continue
+
         if defending:
             # Reduced incoming damage when defending
             raw_dmg = random.randint(enemy.attack_power - 5, enemy.attack_power + 3)
@@ -714,7 +1034,7 @@ class GameEngine:
         centered("S T A R   W A R S", f"{Fore.YELLOW}{Style.BRIGHT}")
         centered("D U E L   O F   F A T E S", f"{Fore.RED}{Style.BRIGHT}")
         print()
-        centered("A Text-Based Adventure", Fore.WHITE + Style.DIM)
+        centered("Expanded Cinematic Terminal Edition", Fore.WHITE + Style.DIM)
         print()
         horizontal_rule("─", Fore.RED + Style.DIM)
 
@@ -749,7 +1069,7 @@ class GameEngine:
         header_box("CHAPTER I", "The Beginning of the End", Fore.YELLOW)
 
         type_text("A long time ago in a galaxy far, far away...", color=Fore.BLUE + Style.BRIGHT)
-        time.sleep(1)
+        sleep_scaled(1)
         print()
         type_text("The Republic has fallen. Chancellor Palpatine has declared himself "
                    "Emperor, and the Jedi Order lies in ruins. On the volcanic planet of "
@@ -780,8 +1100,12 @@ class GameEngine:
         if choice == 1:
             self.player.character = "anakin"
             self.player.morality = -1  # Anakin starts slightly dark
+            self.player.bond_padme = 2
+            self.player.bond_brotherhood = -1
             self.player.add_item("Lightsaber (Blue)")
             self.player.flags["has_padme_necklace"] = True
+            self.player.add_codex("The Chosen One: prophecy twisted by fear")
+            show_portrait("anakin", Fore.RED)
             type_text("You feel the dark side swelling inside you. There is power here — "
                        "power the Jedi were too afraid to use.",
                        color=Fore.RED)
@@ -789,8 +1113,12 @@ class GameEngine:
         else:
             self.player.character = "obiwan"
             self.player.morality = 2  # Obi-Wan starts light-aligned
+            self.player.bond_padme = 1
+            self.player.bond_brotherhood = 3
             self.player.add_item("Lightsaber (Blue)")
             self.player.add_item("Jedi Comlink")
+            self.player.add_codex("The Negotiator: mercy under impossible pressure")
+            show_portrait("obi-wan", Fore.CYAN)
             type_text("You feel the weight of what must be done. Anakin was your brother. "
                        "But the boy you trained is gone.",
                        color=Fore.CYAN)
@@ -803,6 +1131,7 @@ class GameEngine:
     def scene_anakin_arrival(self):
         """Anakin arrives on Mustafar after executing the Separatist leaders."""
         clear_screen()
+        animate_frames(MUSTAFAR_LAVA_FRAMES, Fore.RED, cycles=1, delay=0.12)
         print(f"{Fore.RED}{MUSTAFAR_ART}{Style.RESET_ALL}")
         header_box("MUSTAFAR — CONTROL CENTER", "Anakin's Path", Fore.RED)
 
@@ -818,6 +1147,7 @@ class GameEngine:
         choice = show_choices([
             "Go to Padmé immediately",
             "Search the control room for useful items first",
+            "Slice the damaged Separatist console",
             "Meditate on your new power"
         ])
 
@@ -825,6 +1155,8 @@ class GameEngine:
             return "anakin_padme"
         elif choice == 2:
             return "anakin_search"
+        elif choice == 3:
+            return "anakin_separatist_signal"
         else:
             self.player.shift_morality(-1, "You embrace the dark side's power")
             self.player.force_power = min(self.player.max_force, self.player.force_power + 20)
@@ -832,7 +1164,7 @@ class GameEngine:
                        "flooding you with raw strength. You feel invincible.",
                        color=Fore.RED)
             pause()
-            return "anakin_padme"
+            return "anakin_force_vision"
 
     def scene_anakin_search(self):
         """Optional: loot the control room for an advantage."""
@@ -849,12 +1181,138 @@ class GameEngine:
                    "to an unknown recipient, pleading for help. You feel nothing.",
                    color=Fore.WHITE + Style.DIM)
         pause()
+        return "anakin_separatist_vault"
+
+    def scene_anakin_separatist_signal(self):
+        """Anakin uncovers a hidden recording from Sidious."""
+        cinematic_beat("ENCRYPTED SIGNAL", PALPATINE_HOLO_ART, Fore.MAGENTA,
+                       "A message not meant for you")
+
+        type_text("The console coughs up a corrupted holo. Static shivers into the shape "
+                   "of a hooded figure. The timestamp is from one hour ago.",
+                   color=Fore.WHITE)
+        show_portrait("palpatine", Fore.MAGENTA)
+        type_dialogue("Sidious", "If Lord Vader hesitates, the Kenobi wound will open him. "
+                       "Let the wife see what fear has made of him.", Fore.MAGENTA)
+        print()
+        type_text("The words do not sound like trust. They sound like a trap built around "
+                   "your heart.",
+                   color=Fore.YELLOW)
+
+        choice = show_choices([
+            "Destroy the recording. No one manipulates you.",
+            "Pocket the recording for leverage against Sidious.",
+            "Transmit it to Padmé before she reaches the platform."
+        ])
+
+        if choice == 1:
+            self.player.shift_morality(-1, "rage at being controlled")
+            type_text("You crush the console until sparks rain over the dead room.",
+                       color=Fore.RED)
+        elif choice == 2:
+            self.player.add_item("Sidious Recording")
+            self.player.add_clarity(2, "the master has a leash")
+            self.player.add_codex("Sidious Contingency: Mustafar was bait")
+            self.player.discover_secret(
+                "The Kenobi Wound",
+                "Sidious expected Obi-Wan to become the blade that carved Vader into obedience."
+            )
+        else:
+            self.player.flags["sent_recording_to_padme"] = True
+            self.player.change_bond("padme", 2, "you let her see the truth")
+            self.player.add_clarity(2, "Padmé receives the hidden message")
+            self.player.discover_secret(
+                "Padmé Knows",
+                "Padmé lands with proof that Palpatine has been steering every heartbeat."
+            )
+
+        pause()
+        return "anakin_padme"
+
+    def scene_anakin_force_vision(self):
+        """A Force vision shows Anakin futures he was never meant to see."""
+        cinematic_beat("FORCE VISION", MEMORY_SHARD_ART, Fore.YELLOW,
+                       "The future screams")
+        animate_frames(FORCE_VISION_FRAMES, Fore.YELLOW, cycles=1, delay=0.25)
+
+        type_text("The dark side opens like an eye. You see a black mask descending. "
+                   "You hear a child crying somewhere you cannot reach. You see Obi-Wan "
+                   "walking away with your lightsaber in his hand.",
+                   color=Fore.WHITE)
+        print()
+        type_text("Then the vision fractures: Padmé alive. Obi-Wan beside you. Sidious "
+                   "afraid. Futures fighting like sparks in a storm.",
+                   color=Fore.YELLOW)
+
+        choice = show_choices([
+            "Embrace the mask. Fear will make the galaxy kneel.",
+            "Reject the mask. No master chooses your fate.",
+            "Reach for Padmé through the vision."
+        ])
+
+        if choice == 1:
+            self.player.shift_morality(-2, "you welcome the nightmare")
+            self.player.force_power = min(self.player.max_force, self.player.force_power + 25)
+            self.player.flags["saw_vader_mask"] = True
+        elif choice == 2:
+            self.player.shift_morality(2, "defiance against destiny")
+            self.player.add_clarity(3, "the future can be broken")
+            self.player.flags["rejected_mask"] = True
+        else:
+            self.player.change_bond("padme", 2, "love cuts through the vision")
+            self.player.add_clarity(1, "Padmé is not the enemy")
+            self.player.flags["reached_for_padme"] = True
+
+        self.player.add_codex("Vision Shards: futures are warnings, not verdicts")
+        pause()
+        return "anakin_padme"
+
+    def scene_anakin_separatist_vault(self):
+        """A small optional encounter that can change later endings."""
+        cinematic_beat("SEPARATIST VAULT", DROID_ART, Fore.YELLOW,
+                       "Something survived your fury")
+
+        type_text("A maintenance hatch rattles behind the conference table. A scorched "
+                   "tactical droid unfolds itself from a cabinet, one photoreceptor "
+                   "flickering like a nervous star.",
+                   color=Fore.WHITE)
+        type_dialogue("K-4S", "Statement: I am not strategically relevant enough to execute.",
+                       Fore.YELLOW)
+
+        choice = show_choices([
+            "Spare K-4S and demand useful intelligence",
+            "Reprogram the droid as a weapon",
+            "Destroy it. No witnesses."
+        ])
+
+        if choice == 1:
+            self.player.shift_morality(1, "mercy for the powerless")
+            self.player.flags["kas_spared"] = True
+            self.player.add_item("Droid Transponder")
+            self.player.add_clarity(1, "K-4S maps the Separatist tunnels")
+            self.player.discover_secret(
+                "K-4S Survives",
+                "A terrified machine now knows a hidden route beneath the lava refinery."
+            )
+        elif choice == 2:
+            self.player.shift_morality(-1, "useful things should obey")
+            self.player.flags["kas_reprogrammed"] = True
+            self.player.add_item("Sabotage Spike")
+            type_text("The droid's voice becomes flat. Obedient. Efficient.",
+                       color=Fore.RED)
+        else:
+            self.player.shift_morality(-2, "no witnesses")
+            type_text("One slash. The droid's photoreceptor goes dark.",
+                       color=Fore.RED)
+
+        pause()
         return "anakin_padme"
 
     def scene_anakin_padme(self):
         """The confrontation with Padmé before Obi-Wan reveals himself."""
         clear_screen()
         header_box("LANDING PLATFORM", "Padmé", Fore.RED)
+        show_portrait("padme", Fore.MAGENTA)
 
         type_text("Padmé rushes toward you, her face a mask of fear and hope. She reaches "
                    "for your hands.",
@@ -862,14 +1320,21 @@ class GameEngine:
         type_dialogue("Padmé", "Anakin, I was so worried about you. Obi-Wan told me "
                        "terrible things.", Fore.MAGENTA)
 
+        if self.player.flags.get("sent_recording_to_padme"):
+            type_dialogue("Padmé", "And then your message came through. Anakin... he is "
+                           "using you. He planned this.", Fore.MAGENTA)
+            self.player.add_clarity(1, "Padmé names the manipulation out loud")
+
         choice = show_choices([
             "Reassure her: 'I am more powerful than the Chancellor. I can overthrow him.'",
             "Demand to know what Obi-Wan told her",
-            "Hold her gently and say nothing"
+            "Hold her gently and say nothing",
+            "Show her your fear: 'I saw a future where I lose everything.'"
         ])
 
         if choice == 1:
             self.player.shift_morality(-1, "Hunger for power")
+            self.player.change_bond("padme", -1, "love becomes possession")
             type_dialogue("Padmé", "I don't want to hear any more about Obi-Wan. "
                            "Anakin, all I want is your love.", Fore.MAGENTA)
             type_dialogue(self.player.name, "Love won't save you, Padmé. "
@@ -879,13 +1344,23 @@ class GameEngine:
             type_dialogue("Padmé", "He said... you turned to the dark side. "
                            "That you killed younglings.", Fore.MAGENTA)
             self.player.shift_morality(-1, "Deflecting guilt")
-        else:
+            self.player.change_bond("padme", -1, "you make her defend the truth")
+        elif choice == 3:
             self.player.shift_morality(1, "A moment of tenderness")
+            self.player.change_bond("padme", 1, "you remember how to be gentle")
             type_text("For a brief moment, the rage quiets. You hold her, and you "
                        "almost remember who you used to be.",
                        color=Fore.WHITE)
             if "Bacta Patch" in self.player.inventory:
                 self.player.heal(10)
+        else:
+            self.player.shift_morality(2, "honesty instead of control")
+            self.player.change_bond("padme", 2, "you tell her the truth")
+            self.player.add_clarity(1, "fear is not prophecy")
+            type_dialogue(self.player.name, "I saw myself in a mask. I saw you gone. "
+                           "I don't know how to stop it.", Fore.YELLOW)
+            type_dialogue("Padmé", "Then stop trying to rule the future. Choose me now.",
+                           Fore.MAGENTA)
 
         pause()
         return "anakin_obiwan_appears"
@@ -898,9 +1373,15 @@ class GameEngine:
         type_text("Then you see him. Obi-Wan Kenobi steps off the ramp of Padmé's ship, "
                    "his robes billowing in the volcanic wind.",
                    color=Fore.WHITE)
+        show_portrait("obi-wan", Fore.CYAN)
 
-        type_text("Something inside you snaps. She brought him here. She betrayed you.",
-                   color=Fore.RED)
+        if self.player.clarity >= 3:
+            type_text("The old rage rises, but now it has competition: suspicion. "
+                       "Sidious wanted this exact wound.",
+                       color=Fore.YELLOW)
+        else:
+            type_text("Something inside you snaps. She brought him here. She betrayed you.",
+                       color=Fore.RED)
 
         type_dialogue("Padmé", "No! Anakin, I—", Fore.MAGENTA)
 
@@ -912,6 +1393,8 @@ class GameEngine:
 
         if choice == 1:
             self.player.shift_morality(-3, "You choke the one you love")
+            self.player.change_bond("padme", -4, "you become the thing she feared")
+            self.player.change_bond("brotherhood", -2, "Obi-Wan sees the line crossed")
             type_text("Your hand rises. The dark side coils around Padmé's throat like a "
                        "serpent. She gasps, clawing at nothing, then collapses.",
                        color=Fore.RED)
@@ -919,6 +1402,7 @@ class GameEngine:
             self.player.flags["choked_padme"] = True
         elif choice == 2:
             self.player.shift_morality(1, "You resist the urge to harm Padmé")
+            self.player.change_bond("padme", 1, "you choose restraint")
             type_text("Your fists clench, but you push Padmé behind you and focus your "
                        "rage on the real target.",
                        color=Fore.YELLOW)
@@ -927,10 +1411,61 @@ class GameEngine:
             self.player.flags["choked_padme"] = False
         else:
             self.player.shift_morality(0)
+            self.player.add_clarity(1, "you ask before striking")
             type_dialogue(self.player.name, "Explain. Now.", Fore.RED)
             type_dialogue("Obi-Wan", "Anakin, Chancellor Palpatine is evil.", Fore.CYAN)
             type_dialogue(self.player.name, "From my point of view, the Jedi are evil!", Fore.RED)
             self.player.flags["choked_padme"] = False
+
+        pause()
+        return "anakin_sidious_revelation"
+
+    def scene_anakin_sidious_revelation(self):
+        """Sidious presses the wound he engineered."""
+        clear_screen()
+        if self.player.clarity >= 2 or "Sidious Recording" in self.player.inventory:
+            header_box("THE HAND BEHIND THE FIRE", "The trap reveals its shape", Fore.MAGENTA)
+            print(f"{Fore.MAGENTA}{PALPATINE_HOLO_ART}{Style.RESET_ALL}")
+            type_text("Padmé's ship projector flickers alive without permission. The same "
+                       "hooded face floats in the ash between you and Obi-Wan.",
+                       color=Fore.WHITE)
+            type_dialogue("Sidious", "Good. Let pain complete what instruction could not.",
+                           Fore.MAGENTA)
+            type_dialogue("Obi-Wan", "Anakin, listen to him. He is not saving you. "
+                           "He is spending you.", Fore.CYAN)
+        else:
+            header_box("A VOICE IN THE ASH", "Sidious listens", Fore.MAGENTA)
+            type_text("Your comlink hisses. For a moment, all three of you hear only "
+                       "breathing. Then Palpatine's voice slides through the static.",
+                       color=Fore.WHITE)
+            type_dialogue("Sidious", "Do not hesitate, Lord Vader. Attachments have made "
+                           "you weak before.", Fore.MAGENTA)
+
+        choice = show_choices([
+            "Submit to Sidious. Pain is proof of strength.",
+            "Defy Sidious. No one owns your future.",
+            "Turn to Obi-Wan: 'Did you know he planned this?'"
+        ])
+
+        if choice == 1:
+            self.player.shift_morality(-2, "obedience dressed as power")
+            self.player.force_power = min(self.player.max_force, self.player.force_power + 25)
+            self.player.flags["obeyed_sidious"] = True
+            type_text("The order becomes a chain, and for one terrible second, the chain "
+                       "feels like certainty.",
+                       color=Fore.RED)
+        elif choice == 2:
+            self.player.shift_morality(2, "you refuse the leash")
+            self.player.add_clarity(2, "Sidious can be beaten")
+            self.player.flags["defied_sidious"] = True
+            type_dialogue(self.player.name, "You promised me the power to save her. "
+                           "You only taught me how to lose myself.", Fore.YELLOW)
+        else:
+            self.player.change_bond("brotherhood", 2, "you ask Obi-Wan for truth")
+            self.player.add_clarity(2, "the wound becomes visible")
+            self.player.flags["asked_obiwan_about_sidious"] = True
+            type_dialogue("Obi-Wan", "No. But I should have seen it sooner. I should have "
+                           "seen you sooner.", Fore.CYAN)
 
         pause()
         return "anakin_confrontation"
@@ -947,26 +1482,41 @@ class GameEngine:
         choice = show_choices([
             "'Don't lecture me, Obi-Wan. I have brought peace to my new Empire.'",
             "'You're right... but it's too late for me now.'",
-            "Say nothing. Ignite your lightsaber."
+            "Say nothing. Ignite your lightsaber.",
+            "'If Sidious made this wound, help me cut him out.'"
         ])
 
         if choice == 1:
             self.player.shift_morality(-1, "Arrogance")
+            self.player.change_bond("brotherhood", -1, "you crown yourself above him")
             type_dialogue("Obi-Wan", "Your new Empire?", Fore.CYAN)
             type_dialogue(self.player.name, "If you're not with me, then you're my enemy.", Fore.RED)
             type_dialogue("Obi-Wan", "Only a Sith deals in absolutes. I will do what I must.", Fore.CYAN)
         elif choice == 2:
             self.player.shift_morality(3, "A crack in the darkness")
+            self.player.change_bond("brotherhood", 2, "you let him see the wound")
             self.player.flags["showed_doubt"] = True
             type_text("Obi-Wan's eyes widen. For a heartbeat, hope flickers across his face.",
                        color=Fore.CYAN)
             type_dialogue("Obi-Wan", "It's never too late, Anakin. Come back. Please.", Fore.CYAN)
             # This opens the secret redemption path later
             return "anakin_redemption_choice"
-        else:
+        elif choice == 3:
             self.player.shift_morality(-2, "Cold silence before violence")
             type_text("The hum of your lightsaber fills the silence.",
                        color=Fore.RED)
+        else:
+            if self.player.clarity >= 4 or self.player.flags.get("defied_sidious"):
+                self.player.shift_morality(3, "you choose the enemy behind the enemy")
+                self.player.change_bond("brotherhood", 3, "you ask for help instead of victory")
+                self.player.flags["anti_sidious_pact"] = True
+                type_dialogue("Obi-Wan", "Then lower your blade, and we face him together.",
+                               Fore.CYAN)
+                return "anakin_redemption_choice"
+            self.player.shift_morality(-1, "truth without trust curdles")
+            type_text("You reach for an alliance, but suspicion twists the words into "
+                       "another accusation. Obi-Wan's hand tightens around his saber.",
+                       color=Fore.YELLOW)
 
         pause()
         return "anakin_duel"
@@ -988,7 +1538,8 @@ class GameEngine:
         choice = show_choices([
             "Reach for the light. Drop your weapon.",
             "It's a trick. The dark side is testing you. Fight!",
-            "Walk away. Leave Mustafar. Leave everything."
+            "Walk away. Leave Mustafar. Leave everything.",
+            "Turn the trap back on Sidious with Obi-Wan and Padmé."
         ])
 
         if choice == 1:
@@ -1002,12 +1553,22 @@ class GameEngine:
             pause()
             return "anakin_duel"
         else:
-            self.player.shift_morality(2, "You choose exile over destruction")
-            return "anakin_ending_exile"
+            if choice == 3:
+                self.player.shift_morality(2, "You choose exile over destruction")
+                return "anakin_ending_exile"
+            if self.player.flags.get("anti_sidious_pact") and self.player.bond_padme >= 3:
+                self.player.shift_morality(4, "love and truth become rebellion")
+                return "anakin_ending_rebellion_of_two"
+            type_text("You can see the shape of a better future, but there is not enough "
+                       "trust left in the room to reach it.",
+                       color=Fore.YELLOW)
+            self.player.shift_morality(1, "almost a miracle")
+            return "anakin_duel"
 
     def scene_anakin_duel(self):
         """The lightsaber duel with Obi-Wan — full combat encounter."""
         clear_screen()
+        animate_frames(SABER_LOCK_FRAMES, Fore.YELLOW, cycles=1, delay=0.15)
         print(f"{Fore.YELLOW}{LIGHTSABER_CLASH}{Style.RESET_ALL}")
         header_box("⚔  THE DUEL  ⚔", "Anakin vs. Obi-Wan", Fore.RED)
 
@@ -1038,13 +1599,76 @@ class GameEngine:
             type_text("Your conflicted heart makes your strikes hesitant.",
                        color=Fore.YELLOW + Style.DIM)
             obi_wan.attack_power -= 3  # Obi-Wan holds back too
+        if self.player.flags.get("anti_sidious_pact"):
+            type_text("Neither of you truly wants this duel anymore, but trust is still "
+                       "bleeding out between every exchange.",
+                       color=Fore.YELLOW + Style.DIM)
+            obi_wan.attack_power -= 2
+        if "Sabotage Spike" in self.player.inventory:
+            type_text("Your reprogrammed droid spike overloads a refinery panel behind "
+                       "Obi-Wan, forcing him to split his focus.",
+                       color=Fore.RED + Style.DIM)
+            obi_wan.defense = max(0, obi_wan.defense - 4)
 
         result = run_combat(self.player, obi_wan)
 
         if result == "victory":
-            return "anakin_high_ground_victory"
+            return "anakin_mining_platform_collapse"
         else:
             return "anakin_ending_fall"
+
+    def scene_anakin_mining_platform_collapse(self):
+        """A cinematic aftermath beat before Anakin decides Obi-Wan's fate."""
+        cinematic_beat("THE FACILITY BREAKS", "", Fore.RED,
+                       "Victory is not the same as control")
+
+        type_text("Obi-Wan falls hard against a control rail. The refinery answers with "
+                   "a scream of tortured metal. Lava pumps rupture. Catwalks twist. "
+                   "Padmé's ship rocks on its landing struts.",
+                   color=Fore.WHITE)
+
+        choice = show_choices([
+            "Drive Obi-Wan toward the lava while the platform collapses",
+            "Use the Force to steady Padmé's ship",
+            "Call K-4S through the tunnels and take a hidden route",
+            "Let the whole place burn. You need no one."
+        ])
+
+        if choice == 1:
+            self.player.shift_morality(-2, "victory becomes cruelty")
+            self.player.change_bond("brotherhood", -2, "you use disaster as a weapon")
+            type_text("You press forward, and the collapsing world becomes another blade.",
+                       color=Fore.RED)
+        elif choice == 2:
+            self.player.shift_morality(2, "Padmé before pride")
+            self.player.change_bond("padme", 2, "you save her before claiming victory")
+            if self.player.use_force(20):
+                type_text("The ship steadies. Through the viewport, Padmé sees you choose "
+                           "something other than rage.",
+                           color=Fore.YELLOW)
+            else:
+                type_text("You reach for the ship, but the duel has hollowed you out. "
+                           "The landing struts buckle hard.",
+                           color=Fore.RED)
+                self.player.take_damage(12, "refinery shockwave")
+        elif choice == 3 and self.player.flags.get("kas_spared"):
+            self.player.shift_morality(1, "mercy returns as strategy")
+            self.player.add_clarity(1, "small mercies have long shadows")
+            type_dialogue("K-4S", "Statement: I remain strategically relevant.",
+                           Fore.YELLOW)
+            self.player.flags["hidden_tunnel_open"] = True
+        elif choice == 3:
+            type_text("No answer comes. The little droid you needed is scrap now.",
+                       color=Fore.RED)
+            self.player.take_damage(15, "collapsing refinery")
+        else:
+            self.player.shift_morality(-1, "isolation feels like strength")
+            type_text("The refinery burns around you. You stand in the middle of it, "
+                       "daring the galaxy to matter.",
+                       color=Fore.RED)
+
+        pause()
+        return "anakin_high_ground_victory"
 
     def scene_anakin_high_ground_victory(self):
         """Anakin wins the duel — what does he do with victory?"""
@@ -1057,11 +1681,15 @@ class GameEngine:
         print()
         type_dialogue("Obi-Wan", "Then you truly are lost.", Fore.CYAN)
 
-        choice = show_choices([
+        choices = [
             "Strike him down. Complete your victory.",
             "Spare him. 'You're not worth killing, old man.'",
             "Offer your hand. 'Come with me. We can overthrow the Emperor together.'"
-        ])
+        ]
+        if self.player.clarity >= 5 or "Sidious Recording" in self.player.inventory:
+            choices.append("Broadcast Sidious's betrayal and make Mustafar the first rebellion.")
+
+        choice = show_choices(choices)
 
         if choice == 1:
             self.player.shift_morality(-4, "You kill your master")
@@ -1069,10 +1697,14 @@ class GameEngine:
         elif choice == 2:
             self.player.shift_morality(2, "Mercy")
             return "anakin_ending_hollow"
-        else:
+        elif choice == 3:
             self.player.shift_morality(1, "An unexpected offer")
             self.player.flags["offered_alliance"] = True
             return "anakin_ending_alliance"
+        else:
+            self.player.shift_morality(4, "you name the real enemy")
+            self.player.flags["broadcast_sidious"] = True
+            return "anakin_ending_rebellion_of_two"
 
     # ── Anakin Endings ──
 
@@ -1193,6 +1825,29 @@ class GameEngine:
         self._show_stats("THE GREY PATH — A NEW ORDER")
         return None
 
+    def scene_anakin_ending_rebellion_of_two(self):
+        """Secret ending: Anakin turns against Sidious before Vader is sealed."""
+        clear_screen()
+        print(f"{Fore.YELLOW}{ENDING_ART_REDEMPTION}{Style.RESET_ALL}")
+        print(f"{Fore.MAGENTA}{PALPATINE_HOLO_ART}{Style.RESET_ALL}")
+
+        type_text("The recording goes out on every Separatist emergency channel K-4S can "
+                   "still touch. It jumps to Padmé's ship. Then to Bail Organa. Then to "
+                   "anyone in the new Empire still brave enough to listen.",
+                   color=Fore.YELLOW)
+        print()
+        type_dialogue("Sidious", "Vader. End this.", Fore.MAGENTA)
+        type_dialogue(self.player.name, "My name is Anakin Skywalker.", Fore.YELLOW)
+        type_dialogue("Obi-Wan", "Then we move. Together.", Fore.CYAN)
+        print()
+        type_text("You do not become a saint. Obi-Wan does not forget. Padmé does not "
+                   "pretend the blood is gone. But the first secret of the Empire has "
+                   "been dragged into firelight, and Sidious feels his perfect future "
+                   "split down the middle.",
+                   color=Fore.WHITE)
+        self._show_stats("SECRET ENDING — THE FIRST REBELLION")
+        return None
+
     # ══════════════════════════════════════════════════════════════════════
     #  OBI-WAN PATH
     # ══════════════════════════════════════════════════════════════════════
@@ -1200,6 +1855,7 @@ class GameEngine:
     def scene_obiwan_arrival(self):
         """Obi-Wan arrives on Mustafar, hidden aboard Padmé's ship."""
         clear_screen()
+        animate_frames(MUSTAFAR_LAVA_FRAMES, Fore.CYAN, cycles=1, delay=0.12)
         print(f"{Fore.CYAN}{MUSTAFAR_ART}{Style.RESET_ALL}")
         header_box("MUSTAFAR — PADMÉ'S SHIP", "Obi-Wan's Path", Fore.CYAN)
 
@@ -1219,6 +1875,7 @@ class GameEngine:
 
         if choice == 1:
             self.player.shift_morality(1, "Patience and hope")
+            self.player.change_bond("brotherhood", 1, "you give love one last chance")
             type_text("Through the hull, you hear their voices. Padmé pleading. Anakin's "
                        "voice, cold and unrecognizable. Then a choking sound. A body falling.",
                        color=Fore.WHITE + Style.DIM)
@@ -1226,6 +1883,7 @@ class GameEngine:
                        color=Fore.RED)
             self.player.flags["padme_choked"] = True
         elif choice == 2:
+            self.player.change_bond("brotherhood", -1, "Anakin sees ambush before mercy")
             type_text("You stride down the ramp. Anakin sees you before you can speak.",
                        color=Fore.WHITE)
             type_dialogue("Anakin", "YOU! You turned her against me!", Fore.RED)
@@ -1233,10 +1891,62 @@ class GameEngine:
         else:
             self.player.add_item("Bacta Patch")
             self.player.add_item("Emergency Flare")
+            self.player.add_clarity(1, "you prepare before the wound opens")
             type_text("You find a bacta patch and an emergency flare in the cargo hold. "
                        "Then you hear Padmé scream.",
                        color=Fore.YELLOW)
             self.player.flags["padme_choked"] = True
+
+        pause()
+        return "obiwan_force_echo"
+
+    def scene_obiwan_force_echo(self):
+        """Obi-Wan senses the larger trap around the duel."""
+        cinematic_beat("A QUIET VOICE", HOLOCRON_ART, Fore.CYAN,
+                       "The Force has not abandoned you")
+        show_portrait("qui-gon", Fore.CYAN)
+
+        type_text("For one impossible heartbeat, the roar of Mustafar falls away. "
+                   "You smell rain on Naboo, engine oil on Tatooine, and the library "
+                   "dust of the Temple before it burned.",
+                   color=Fore.WHITE)
+        type_dialogue("Qui-Gon", "The Sith do not merely kill people, Obi-Wan. They arrange "
+                       "people so they kill themselves.", Fore.CYAN)
+        print()
+        type_text("The words settle like a hand on your shoulder. This duel is real, but "
+                   "it is also staged: Palpatine's theatre, written in grief.",
+                   color=Fore.YELLOW)
+
+        choice = show_choices([
+            "Listen for Anakin beneath Vader",
+            "Stabilize Padmé first; no victory matters if she dies",
+            "Send a coded warning to Bail Organa",
+            "Seal your heart. Duty must be clean."
+        ])
+
+        if choice == 1:
+            self.player.shift_morality(2, "compassion sharpened into focus")
+            self.player.change_bond("brotherhood", 2, "you listen for your brother")
+            self.player.add_clarity(2, "the duel is a trap")
+            self.player.flags["heard_quigon"] = True
+        elif choice == 2:
+            self.player.change_bond("padme", 2, "you protect the innocent first")
+            self.player.add_item("Medpac Beacon")
+            self.player.flags["padme_stabilized"] = True
+            type_text("You prime the medbay beacon. Padmé's pulse steadies just enough.",
+                       color=Fore.CYAN)
+        elif choice == 3:
+            self.player.add_clarity(2, "the rebellion gets its first warning")
+            self.player.flags["bail_warned"] = True
+            self.player.discover_secret(
+                "Bail Warned",
+                "A coded packet leaves Mustafar before the Empire can lock the channels."
+            )
+        else:
+            self.player.shift_morality(-1, "duty without tenderness")
+            self.player.change_bond("brotherhood", -2, "you bury the brother to fight the Sith")
+            type_text("You close the door inside yourself. It helps. That frightens you.",
+                       color=Fore.WHITE + Style.DIM)
 
         pause()
         return "obiwan_confrontation"
@@ -1252,26 +1962,46 @@ class GameEngine:
         choice = show_choices([
             "'Your anger and lust for power have already done that.'",
             "'I have failed you, Anakin. I have failed you.'",
-            "'There is still good in you. I can feel it.'"
+            "'There is still good in you. I can feel it.'",
+            "'This duel is exactly what Sidious wants.'"
         ])
 
         if choice == 1:
+            self.player.change_bond("brotherhood", -1, "truth lands as judgment")
             type_dialogue("Anakin", "Don't lecture me, Obi-Wan. I see through the lies "
                            "of the Jedi.", Fore.RED)
         elif choice == 2:
             self.player.shift_morality(1, "Humility before pride")
+            self.player.change_bond("brotherhood", 1, "you own your failure")
             type_dialogue("Anakin", "I should have known the Jedi were plotting to take over.",
                            Fore.RED)
             type_dialogue(self.player.name, "Anakin, Chancellor Palpatine is evil!", Fore.CYAN)
             type_dialogue("Anakin", "From my point of view, the Jedi are evil!", Fore.RED)
-        else:
+        elif choice == 3:
             self.player.shift_morality(2, "Faith in your brother")
+            self.player.change_bond("brotherhood", 2, "you call him by name inside the dark")
             self.player.flags["appealed_to_good"] = True
             type_text("Anakin hesitates. Just for a moment, something flickers in his "
                        "yellow eyes. Then it's gone.",
                        color=Fore.YELLOW)
             type_dialogue("Anakin", "You don't know the power of the dark side. "
                            "I must obey my master.", Fore.RED)
+        else:
+            if self.player.clarity >= 2:
+                self.player.shift_morality(2, "you name the trap")
+                self.player.change_bond("brotherhood", 2, "you fight Sidious's script")
+                self.player.flags["exposed_sidious_trap"] = True
+                self.player.flags["appealed_to_good"] = True
+                type_dialogue(self.player.name, "He chose this place, this timing, this wound. "
+                               "He is making us finish his work.", Fore.CYAN)
+                type_dialogue("Anakin", "Liar.", Fore.RED)
+                type_text("But he says it too quickly. The word lands wrong.",
+                           color=Fore.YELLOW)
+            else:
+                self.player.shift_morality(0)
+                type_text("You sense the shape of a deeper trap, but you cannot prove it. "
+                           "Anakin hears only another Jedi accusation.",
+                           color=Fore.WHITE + Style.DIM)
 
         type_dialogue("Anakin", "If you're not with me, then you're my enemy.", Fore.RED)
         type_dialogue(self.player.name, "Only a Sith deals in absolutes. "
@@ -1283,6 +2013,7 @@ class GameEngine:
     def scene_obiwan_duel(self):
         """The lightsaber duel — Obi-Wan vs. Anakin."""
         clear_screen()
+        animate_frames(SABER_LOCK_FRAMES, Fore.YELLOW, cycles=1, delay=0.15)
         print(f"{Fore.YELLOW}{LIGHTSABER_CLASH}{Style.RESET_ALL}")
         header_box("⚔  THE DUEL  ⚔", "Obi-Wan vs. Anakin", Fore.CYAN)
 
@@ -1310,13 +2041,71 @@ class GameEngine:
             type_text("Your earlier words echo in Anakin's mind. His strikes are "
                        "powerful but conflicted.",
                        color=Fore.YELLOW + Style.DIM)
+        if self.player.flags.get("exposed_sidious_trap"):
+            anakin.attack_power -= 3
+            anakin.defense = max(0, anakin.defense - 2)
+            type_text("The idea of Sidious's trap gnaws at him. Every third strike is "
+                       "rage. Every fourth is doubt.",
+                       color=Fore.MAGENTA + Style.DIM)
+        if self.player.flags.get("padme_stabilized"):
+            self.player.force_power = min(self.player.max_force, self.player.force_power + 15)
+            type_text("Knowing Padmé is breathing steadies your connection to the Force.",
+                       color=Fore.CYAN + Style.DIM)
 
         result = run_combat(self.player, anakin)
 
         if result == "victory":
-            return "obiwan_high_ground"
+            return "obiwan_crumbling_facility"
         else:
             return "obiwan_ending_defeat"
+
+    def scene_obiwan_crumbling_facility(self):
+        """Obi-Wan must choose what to save as the facility collapses."""
+        cinematic_beat("REFINERY COLLAPSE", "", Fore.CYAN,
+                       "The duel spills into disaster")
+
+        type_text("Your final exchange shatters the control gantry. Magma pressure alarms "
+                   "howl across the facility. Below, Padmé's ship trembles. Above, Anakin "
+                   "scrambles toward the open lava bank.",
+                   color=Fore.WHITE)
+
+        choice = show_choices([
+            "Pursue Anakin immediately",
+            "Use the Emergency Flare to guide rescuers to Padmé",
+            "Send Bail Organa the proof before the channel dies",
+            "Slow down and speak Anakin's name through the Force"
+        ])
+
+        if choice == 1:
+            self.player.shift_morality(0)
+            type_text("You pursue. Duty first. The galaxy may survive you being cold.",
+                       color=Fore.CYAN)
+        elif choice == 2 and "Emergency Flare" in self.player.inventory:
+            self.player.remove_item("Emergency Flare")
+            self.player.change_bond("padme", 2, "you make sure she is found")
+            self.player.flags["padme_rescue_marked"] = True
+            type_text("The flare cuts upward through ash: a white star over the landing pad.",
+                       color=Fore.YELLOW)
+        elif choice == 2:
+            type_text("You reach for a flare you never took. The ash swallows the platform.",
+                       color=Fore.RED)
+            self.player.take_damage(10, "falling debris")
+        elif choice == 3:
+            self.player.add_clarity(1, "truth escapes Mustafar")
+            self.player.flags["bail_warned"] = True
+            self.player.discover_secret(
+                "The First Packet",
+                "Before the duel ends, Bail Organa receives enough truth to begin resisting."
+            )
+        else:
+            self.player.shift_morality(2, "you refuse to fight a mask alone")
+            self.player.change_bond("brotherhood", 2, "you call for Anakin, not Vader")
+            self.player.flags["force_called_anakin"] = True
+            type_text("Across the lava, Anakin flinches as if someone touched a bruise.",
+                       color=Fore.YELLOW)
+
+        pause()
+        return "obiwan_high_ground"
 
     def scene_obiwan_high_ground(self):
         """Obi-Wan reaches the high ground — the iconic moment."""
@@ -1330,11 +2119,15 @@ class GameEngine:
         type_dialogue(self.player.name, "It's over, Anakin! I have the high ground.", Fore.CYAN)
         type_dialogue("Anakin", "You underestimate my power!", Fore.RED)
 
-        choice = show_choices([
+        choices = [
             "'Don't try it.'",
             "Throw your lightsaber aside and plead with him one last time",
             "Use the Force to push him back from the edge, saving him from himself"
-        ])
+        ]
+        if self.player.flags.get("exposed_sidious_trap") or self.player.flags.get("bail_warned"):
+            choices.append("Show him Sidious's trap and refuse the script")
+
+        choice = show_choices(choices)
 
         if choice == 1:
             type_text("He leaps. Your blade moves on instinct, severing his legs and arm. "
@@ -1358,7 +2151,7 @@ class GameEngine:
                     return "obiwan_ending_canon"
                 else:
                     return "obiwan_ending_defeat"
-        else:
+        elif choice == 3:
             self.player.shift_morality(2, "Compassion over victory")
             if self.player.use_force(40):
                 type_text("You reach out with the Force — not to attack, but to pull "
@@ -1370,6 +2163,15 @@ class GameEngine:
                 type_text("You don't have enough strength left. Anakin leaps.",
                            color=Fore.RED)
                 return "obiwan_ending_canon"
+        else:
+            if (self.player.bond_brotherhood >= 7 and
+                    (self.player.flags.get("force_called_anakin") or self.player.flags.get("heard_quigon"))):
+                self.player.shift_morality(4, "you break the Sith script")
+                return "obiwan_ending_broken_mask"
+            type_text("You show him every piece of the trap, but the wound is still too "
+                       "fresh. He leaps with tears in his eyes.",
+                       color=Fore.YELLOW)
+            return "obiwan_ending_canon"
 
     # ── Obi-Wan Endings ──
 
@@ -1454,6 +2256,30 @@ class GameEngine:
         self._show_stats("THE LONG ROAD — MERCY ENDURES")
         return None
 
+    def scene_obiwan_ending_broken_mask(self):
+        """Secret Obi-Wan ending: the staged tragedy fails."""
+        clear_screen()
+        print(f"{Fore.YELLOW}{ENDING_ART_REDEMPTION}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{JEDI_BEACON_ART}{Style.RESET_ALL}")
+
+        type_text("You do not throw away your lightsaber. You do not raise it either. "
+                   "You hold Sidious's lie between you and Anakin like a mirror.",
+                   color=Fore.CYAN)
+        print()
+        type_dialogue(self.player.name, "He wanted me to make you into a wound he could "
+                       "wear as armor. I will not.", Fore.CYAN)
+        type_dialogue("Anakin", "I killed them.", Fore.RED)
+        type_dialogue(self.player.name, "Yes. And if there is any justice left in the "
+                       "galaxy, you will spend the rest of your life answering for it. "
+                       "But not as his slave.", Fore.CYAN)
+        print()
+        type_text("The saber falls from Anakin's hand before he does. On Alderaan, Bail "
+                   "Organa receives your warning. In the Senate, Padmé wakes to a war "
+                   "that has not yet learned its own name.",
+                   color=Fore.WHITE)
+        self._show_stats("SECRET ENDING — THE BROKEN MASK")
+        return None
+
     # ══════════════════════════════════════════════════════════════════════
     #  UTILITY METHODS
     # ══════════════════════════════════════════════════════════════════════
@@ -1483,14 +2309,24 @@ class GameEngine:
             ("Character", self.player.character.title()),
             ("Alignment", alignment),
             ("Morality Score", str(self.player.morality)),
+            ("Clarity", str(self.player.clarity)),
+            ("Padme Bond", str(self.player.bond_padme)),
+            ("Brotherhood Bond", str(self.player.bond_brotherhood)),
             ("Health Remaining", f"{self.player.health}/{self.player.max_health}"),
             ("Choices Made", str(self.player.choices_made)),
             ("Items Found", str(len(self.player.inventory))),
+            ("Secrets Found", str(self.player.secrets_found)),
         ]
 
         for label, value in stats:
             print(f"  {Fore.WHITE}{Style.DIM}{label + ':':<22}{Style.RESET_ALL}"
                   f"{Fore.YELLOW}{value}{Style.RESET_ALL}")
+
+        if self.player.codex:
+            print()
+            print(f"  {Fore.BLUE}{Style.BRIGHT}Codex:{Style.RESET_ALL}")
+            for entry in self.player.codex[-5:]:
+                print(f"  {Fore.WHITE}{Style.DIM}- {entry}{Style.RESET_ALL}")
 
         print()
         horizontal_rule("─", Fore.WHITE + Style.DIM)
