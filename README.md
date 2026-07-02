@@ -17,6 +17,32 @@ The game reimagines the fall of the Republic as an interactive text RPG with bra
 - Manual save, load, autosave, and runtime save cleanup after completed endings
 - Fast test mode through `DUEL_OF_FATES_FAST=1`
 
+## Choice & Ending Map
+
+The full spoiler-heavy route map is available in [docs/CHOICE_MAP.md](docs/CHOICE_MAP.md). It covers the three protagonist routes, major choices, conditional unlocks, combat gates, secret flags, and all 17 endings.
+
+```mermaid
+flowchart LR
+    Start["Start"]:::hub --> Choice["Choose Destiny"]:::hub
+    Choice --> Anakin["Anakin<br/>rage, prophecy, manipulation"]:::anakin
+    Choice --> ObiWan["Obi-Wan<br/>duty, mercy, brotherhood"]:::obiwan
+    Choice --> Padme["Padme<br/>truth, survival, rebellion"]:::padme
+
+    Anakin --> AEnds["7 Endings"]:::ending
+    ObiWan --> OEnds["5 Endings"]:::ending
+    Padme --> PEnds["5 Endings"]:::ending
+
+    AEnds --> Total["17 Total Endings"]:::hub
+    OEnds --> Total
+    PEnds --> Total
+
+    classDef hub fill:#f8d66d,stroke:#7a5b00,color:#1b1600,stroke-width:2px;
+    classDef anakin fill:#3b1111,stroke:#ff5a5a,color:#fff3f3,stroke-width:2px;
+    classDef obiwan fill:#102f52,stroke:#71c8ff,color:#eef8ff,stroke-width:2px;
+    classDef padme fill:#3b1646,stroke:#df87ff,color:#fff4ff,stroke-width:2px;
+    classDef ending fill:#14351f,stroke:#72df8a,color:#f3fff5,stroke-width:2px;
+```
+
 ## Playable Routes
 
 ### Anakin Skywalker
@@ -144,6 +170,8 @@ During choice prompts:
 
 ```text
 StarWars-Text-Adventure/
+├── docs/
+│   └── CHOICE_MAP.md         # spoiler-heavy route and ending map
 ├── main.py                  # game code
 ├── README.md                # public project documentation
 ├── requirements.txt         # Python dependencies

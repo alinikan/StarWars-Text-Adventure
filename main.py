@@ -344,10 +344,18 @@ def show_choices(choices: list[str]) -> int:
     Returns:
         The 1-based index of the selected choice.
     """
-    print()
-    for i, choice in enumerate(choices, 1):
-        print(f"  {Fore.YELLOW}{Style.BRIGHT}[{i}]{Style.RESET_ALL} {choice}")
-    print(f"\n  {Fore.WHITE}{Style.DIM}Commands: [S]ave  [L]oad  [C]odex  [M]emories  [Q]uit{Style.RESET_ALL}\n")
+    def render_current_choices(redraw: bool = False):
+        if redraw:
+            clear_screen()
+            header_box("CURRENT CHOICES", "Resume the moment", Fore.YELLOW)
+            if ACTIVE_ENGINE is not None:
+                status_bar(ACTIVE_ENGINE.player)
+        print()
+        for i, choice in enumerate(choices, 1):
+            print(f"  {Fore.YELLOW}{Style.BRIGHT}[{i}]{Style.RESET_ALL} {choice}")
+        print(f"\n  {Fore.WHITE}{Style.DIM}Commands: [S]ave  [L]oad  [C]odex  [M]emories  [Q]uit{Style.RESET_ALL}\n")
+
+    render_current_choices()
 
     while True:
         raw = input(f"  {Fore.YELLOW}▸ {Style.RESET_ALL}").strip()
@@ -385,6 +393,7 @@ def show_choices(choices: list[str]) -> int:
                 print(f"  {Fore.RED}No active codex yet.{Style.RESET_ALL}")
                 continue
             show_codex_menu(ACTIVE_ENGINE.player)
+            render_current_choices(redraw=True)
             continue
 
         if lowered in {"m", "memory", "memories", "shards"}:
@@ -392,6 +401,7 @@ def show_choices(choices: list[str]) -> int:
                 print(f"  {Fore.RED}No memory shards yet.{Style.RESET_ALL}")
                 continue
             show_memory_shards(ACTIVE_ENGINE.player)
+            render_current_choices(redraw=True)
             continue
 
         if lowered in {"q", "quit", "exit"}:
