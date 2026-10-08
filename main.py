@@ -21,8 +21,8 @@
 ║    • Dynamic music moods and synthesized terminal SFX                      ║
 ║    • Autosave and manual save/load support                                 ║
 ║                                                                            ║
-║  Requirements: Python 3.8+, colorama, pygame                               ║
-║  Install:  pip install colorama pygame                                     ║
+║  Requirements: Python 3.10+, colorama, pygame, blessed, pathfinding         ║
+║  Install:  python3 -m pip install -r requirements.txt                       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -34,6 +34,8 @@ import random
 import textwrap
 import math
 import struct
+import shutil
+from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Callable
@@ -41,7 +43,18 @@ from enum import Enum
 
 # Third-party imports for terminal colors and audio
 from colorama import Fore, Back, Style, init
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
+
+try:
+    from holotactics import arcade_menu, play_mission
+    from holotactics.content import MISSIONS
+    from holotactics.render import RenderOptions
+    ACTION_AVAILABLE = True
+except ModuleNotFoundError as error:
+    if error.name not in {"blessed", "pathfinding"}:
+        raise
+    ACTION_AVAILABLE = False
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CONFIGURATION
@@ -61,7 +74,10 @@ ANIMATION_DELAY = 0.08
 FAST_MODE = os.environ.get("DUEL_OF_FATES_FAST", "").lower() in {"1", "true", "yes", "on"}
 
 # Save file location
-SAVE_FILE = "duel_of_fates_save.json"
+PROJECT_ROOT = Path(__file__).resolve().parent
+SAVE_FILE = str(PROJECT_ROOT / "duel_of_fates_save.json")
+PREFERENCE_KEYS = ("action_difficulty", "ascii_mode", "reduced_motion", "muted",
+                   "music_muted", "sfx_muted", "skip_field_missions")
 
 
 def sleep_scaled(seconds: float):
@@ -83,6 +99,10 @@ class AudioEngine:
         self.enabled = False
         self.current_music = None
         self.current_mood = None
+        self.muted = False
+        self.music_muted = False
+        self.sfx_muted = False
+        self.tone_cache = {}
         self.mood_volume = {
             "title": 0.35,
             "tension": 0.42,
@@ -95,6 +115,7 @@ class AudioEngine:
         try:
             pygame.mixer.pre_init(44100, -16, 1, 512)
             pygame.mixer.init()
+            pygame.mixer.set_num_channels(16)
             self.enabled = True
         except pygame.error:
             pass  # Audio unavailable — continue silently
@@ -108,38 +129,65 @@ class AudioEngine:
             loops: -1 for infinite loop, 0 for play once.
             volume: Float between 0.0 and 1.0.
         """
-        if not self.enabled:
-            return
+        if not self.enabled or self.muted or self.music_muted:
+            return False
         try:
             if self.current_music == filename and pygame.mixer.music.get_busy():
                 pygame.mixer.music.set_volume(volume)
-                return
+                return True
             pygame.mixer.music.load(filename)
             pygame.mixer.music.set_volume(volume)
             pygame.mixer.music.play(loops)
             self.current_music = filename
+            return True
         except pygame.error:
-            pass
+            return False
 
     def set_mood(self, mood: str):
-        """Switch music intensity for the current scene."""
-        if not self.enabled:
-            return
+        """Keep the soundtrack running; use real mood tracks when available."""
         if mood == self.current_mood:
             return
         self.current_mood = mood
+        if not self.enabled or self.muted or self.music_muted or FAST_MODE:
+            return
         if mood == "silence":
             self.stop_music()
+            self.current_mood = "silence"
             return
         volume = self.mood_volume.get(mood, 0.4)
-        if os.path.exists("song.mp3"):
-            self.play_music("song.mp3", volume=volume)
-        elif pygame.mixer.music.get_busy():
-            pygame.mixer.music.set_volume(volume)
+        custom = PROJECT_ROOT / "assets" / "audio" / f"{mood}.ogg"
+        legacy = PROJECT_ROOT / "song.mp3"
+        if custom.is_file() and self.play_music(str(custom), volume=volume):
+            return
+        if legacy.is_file():
+            self.play_music(str(legacy), volume=volume)
+
+    def _resume_music(self):
+        mood = self.current_mood
+        if mood and not self.muted and not self.music_muted:
+            self.current_mood = None
+            self.set_mood(mood)
+
+    def set_music_muted(self, muted: bool):
+        self.music_muted = muted
+        if self.enabled and muted:
+            pygame.mixer.music.stop()
+            self.current_music = None
+        elif not muted:
+            self._resume_music()
+
+    def set_muted(self, muted: bool):
+        self.muted = muted
+        if self.enabled and muted:
+            pygame.mixer.stop()
+            pygame.mixer.music.stop()
+            self.current_music = None
+        elif not muted:
+            self._resume_music()
 
     def play_sfx(self, filename: str, volume: float = 0.7):
         """Play a one-shot sound effect."""
-        if not self.enabled:
+        if not self.enabled or self.muted or self.sfx_muted:
             return
         try:
             sfx = pygame.mixer.Sound(filename)
@@ -150,9 +198,13 @@ class AudioEngine:
 
     def play_tone(self, frequency: int, duration: float = 0.08, volume: float = 0.18):
         """Play a tiny synthesized tone without requiring sound-effect files."""
-        if not self.enabled or FAST_MODE:
+        if not self.enabled or self.muted or self.sfx_muted or FAST_MODE:
             return
         try:
+            key = (frequency, duration, volume)
+            if key in self.tone_cache:
+                self.tone_cache[key].play()
+                return
             sample_rate = 44100
             sample_count = int(sample_rate * duration)
             amplitude = int(32767 * max(0.0, min(volume, 1.0)))
@@ -161,11 +213,13 @@ class AudioEngine:
                 envelope = 1.0 - (i / max(1, sample_count))
                 sample = int(amplitude * envelope * math.sin(2 * math.pi * frequency * i / sample_rate))
                 raw.extend(struct.pack("<h", sample))
-            pygame.mixer.Sound(buffer=bytes(raw)).play()
+            sound = pygame.mixer.Sound(buffer=bytes(raw))
+            self.tone_cache[key] = sound
+            sound.play()
         except (pygame.error, ValueError):
             pass
 
-    def play_sfx_cue(self, cue: str):
+    def play_sfx_cue(self, cue: str, instant: bool = False):
         """Play a named synthesized UI/story cue."""
         cues = {
             "select": [(660, 0.035, 0.08)],
@@ -178,19 +232,29 @@ class AudioEngine:
             "heal": [(440, 0.06, 0.10), (660, 0.08, 0.10)],
             "clash": [(260, 0.05, 0.16), (740, 0.05, 0.12)],
             "broadcast": [(440, 0.04, 0.08), (554, 0.04, 0.08), (659, 0.08, 0.10)],
+            "blaster": [(940, 0.04, 0.12), (180, 0.05, 0.12)],
+            "power": [(110, 0.10, 0.12), (220, 0.08, 0.10)],
         }
         for frequency, duration, volume in cues.get(cue, []):
             self.play_tone(frequency, duration, volume)
-            sleep_scaled(duration * 0.35)
+            if not instant:
+                sleep_scaled(duration * 0.35)
 
     def stop_music(self):
         """Fade out and stop background music."""
         if self.enabled:
             pygame.mixer.music.fadeout(2000)
             self.current_music = None
+        self.current_mood = None
 
 
 audio = AudioEngine()
+
+
+def apply_audio_settings(flags):
+    audio.sfx_muted = bool(flags.get("sfx_muted"))
+    audio.set_music_muted(bool(flags.get("music_muted")))
+    audio.set_muted(bool(flags.get("muted")))
 
 
 ACTIVE_ENGINE = None
@@ -353,7 +417,7 @@ def show_choices(choices: list[str]) -> int:
         print()
         for i, choice in enumerate(choices, 1):
             print(f"  {Fore.YELLOW}{Style.BRIGHT}[{i}]{Style.RESET_ALL} {choice}")
-        print(f"\n  {Fore.WHITE}{Style.DIM}Commands: [S]ave  [L]oad  [C]odex  [M]emories  [Q]uit{Style.RESET_ALL}\n")
+        print(f"\n  {Fore.WHITE}{Style.DIM}[S] Save  [L] Load  [C] Codex  [M] Memories  [O] Settings  [Q] Quit{Style.RESET_ALL}\n")
 
     render_current_choices()
 
@@ -375,17 +439,23 @@ def show_choices(choices: list[str]) -> int:
                 print(f"  {Fore.RED}No save file found.{Style.RESET_ALL}")
                 continue
             if ACTIVE_ENGINE is not None and not getattr(ACTIVE_ENGINE, f"scene_{saved.current_scene}", None):
-                print(f"  {Fore.RED}Save file is outdated or corrupted. Clearing it now.{Style.RESET_ALL}")
-                delete_save()
+                print(f"  {Fore.RED}This save uses an unsupported scene. The file has been preserved.{Style.RESET_ALL}")
                 continue
             if ACTIVE_ENGINE is not None:
                 ACTIVE_ENGINE.player = saved
+                apply_audio_settings(saved.flags)
             print(f"\n  {Fore.GREEN}✓ Save loaded. Resuming {saved.name or 'your adventure'} at '{saved.current_scene}'.{Style.RESET_ALL}")
             pause()
             raise LoadRequested()
 
         if lowered in {"h", "help", "?"}:
-            print(f"  {Fore.WHITE}{Style.DIM}Type a choice number, or use S to save, L to load, C for codex, M for memories, or Q to quit.{Style.RESET_ALL}")
+            print(f"  {Fore.WHITE}{Style.DIM}Choose a number. S save, L load, C codex, M memories, O settings, Q quit.{Style.RESET_ALL}")
+            continue
+
+        if lowered in {"o", "options", "settings"}:
+            if ACTIVE_ENGINE is not None:
+                show_terminal_settings(ACTIVE_ENGINE.player)
+                render_current_choices(redraw=True)
             continue
 
         if lowered in {"c", "codex", "journal", "status"}:
@@ -434,6 +504,61 @@ def show_choices(choices: list[str]) -> int:
 def pause(prompt: str = "Press Enter to continue..."):
     """Wait for the player to press Enter before proceeding."""
     input(f"\n  {Fore.WHITE}{Style.DIM}{prompt}{Style.RESET_ALL}")
+
+
+def terminal_options(player):
+    flags = player.flags if player else {}
+    return RenderOptions(bool(flags.get("ascii_mode")), bool(flags.get("reduced_motion")))
+
+
+def show_terminal_settings(player):
+    flags = player.flags
+    if flags.get("muted"):
+        flags["music_muted"] = flags["sfx_muted"] = True
+        flags["muted"] = False
+    apply_audio_settings(flags)
+    while True:
+        clear_screen()
+        header_box("SETTINGS", "Duel of Fates", Fore.CYAN)
+        print(f"  [1] Music                 {'Off' if flags.get('music_muted') else 'On'}")
+        print(f"  [2] Sound effects         {'Off' if flags.get('sfx_muted') else 'On'}")
+        print(f"  [3] Optional 2D missions  {'Skip' if flags.get('skip_field_missions') else 'Ask each time'}")
+        print("  [4] Mission display and difficulty")
+        print("\n  [5] Back")
+        raw = input("\n  > ").strip().lower()
+        if raw in {"1", "2", "3"}:
+            key = {"1": "music_muted", "2": "sfx_muted", "3": "skip_field_missions"}[raw]
+            flags[key] = not flags.get(key)
+            apply_audio_settings(flags)
+        elif raw == "4":
+            show_mission_settings(player)
+        elif raw in {"5", "q", "", "back"}:
+            return
+        else:
+            print("  Choose 1-5.")
+
+
+def show_mission_settings(player):
+    while True:
+        clear_screen()
+        header_box("OPTIONAL MISSIONS", "Display and difficulty", Fore.CYAN)
+        flags = player.flags
+        difficulty = flags.get("action_difficulty", "story")
+        levels = ["story", "standard", "veteran"]
+        if difficulty not in levels:
+            difficulty = "story"
+        print(f"  [1] Difficulty   {difficulty.title()}")
+        print(f"  [2] Display      {'ASCII' if flags.get('ascii_mode') else 'Pixel'}")
+        print(f"  [3] Motion       {'Reduced' if flags.get('reduced_motion') else 'Full'}")
+        print("\n  [4] Back")
+        raw = input("\n  > ").strip().lower()
+        if raw == "1":
+            flags["action_difficulty"] = levels[(levels.index(difficulty) + 1) % len(levels)]
+        elif raw in {"2", "3"}:
+            key = "ascii_mode" if raw == "2" else "reduced_motion"
+            flags[key] = not flags.get(key)
+        elif raw in {"4", "q", "", "back"}:
+            return
 
 
 def alignment_label(player) -> str:
@@ -1292,6 +1417,52 @@ class GameEngine:
     def __init__(self):
         self.player = PlayerState()
         self.running = True
+        self.restart_requested = False
+        self.launch_overrides = {}
+        self.preferences_loaded = False
+
+    def offer_field_mission(self, mission):
+        offered = "field_offered_" + mission
+        if (not ACTION_AVAILABLE or self.player.flags.get("skip_field_missions")
+                or self.player.flags.get("field_" + mission) or self.player.flags.get(offered)):
+            return
+        data = MISSIONS[mission]
+        print()
+        horizontal_rule("─", Fore.CYAN + Style.DIM)
+        print(f"  {Fore.CYAN}OPTIONAL MISSION: {data.title}{Style.RESET_ALL}")
+        type_text(data.briefing, color=Fore.WHITE, speed=TYPE_SPEED_FAST)
+        choice = show_choices(["Continue the story.", "Play the optional 2D terminal mission."])
+        self.player.flags[offered] = True
+        if choice != 2:
+            return
+        result = play_mission(mission, self.player.character, audio=audio,
+                              options=terminal_options(self.player),
+                              difficulty=self.player.flags.get("action_difficulty", "story"))
+        clear_screen()
+        if result is None or result.outcome == "abandoned":
+            header_box("BACK TO THE STORY", data.title, Fore.CYAN)
+            type_text("You return to the investigation. Your campaign resources are unchanged.",
+                      color=Fore.WHITE, speed=TYPE_SPEED_FAST)
+            return
+        header_box("MISSION COMPLETE" if result.outcome == "victory" else "BACK TO THE STORY",
+                   data.title, Fore.CYAN)
+        if result.outcome == "victory":
+            self.player.flags["field_" + mission] = True
+            self.player.add_clarity(1, "a signal rescued from the Empire")
+            self.player.add_item("Bacta Patch")
+            self.player.add_codex(data.title + ": " + data.objective)
+            if result.memory_found:
+                self.player.add_memory_shard(*data.memory)
+            if mission == "archive":
+                self.player.add_item("Rebellion Beacon")
+                self.player.flags["bail_network"] = True
+            else:
+                self.player.change_bond("brotherhood", 1, "you remember the people below")
+            save_game(self.player, silent=True)
+        else:
+            type_text("Security seals the auxiliary passage. You return to the main "
+                      "console; your investigation can still continue.", color=Fore.YELLOW)
+        pause()
 
     def _sync_audio_for_scene(self, scene_name: str):
         """Pick a music mood from the scene name."""
@@ -1334,51 +1505,76 @@ class GameEngine:
                 break
 
             if next_scene is None:
+                if self.restart_requested:
+                    self.restart_requested = False
+                    continue
                 self.running = False
             else:
                 self.player.current_scene = next_scene
-                self.player.choices_made += 1
-                save_game(self.player, silent=True)  # Autosave after each successful scene transition
+                if next_scene != "title":
+                    self.player.choices_made += 1
+                    save_game(self.player, silent=True)
 
     # ══════════════════════════════════════════════════════════════════════
     #  TITLE & SETUP SCENES
     # ══════════════════════════════════════════════════════════════════════
 
     def scene_title(self):
-        """Title screen with new game / load game options."""
-        clear_screen()
-        print(f"{Fore.RED}{Style.BRIGHT}{TITLE_ART}{Style.RESET_ALL}")
-        centered("S T A R   W A R S", f"{Fore.YELLOW}{Style.BRIGHT}")
-        centered("D U E L   O F   F A T E S", f"{Fore.RED}{Style.BRIGHT}")
-        print()
-        centered("Expanded Cinematic Terminal Edition", Fore.WHITE + Style.DIM)
-        print()
-        horizontal_rule("─", Fore.RED + Style.DIM)
-
+        """A dedicated start menu; story commands appear only during play."""
         saved = load_game()
         if saved and not getattr(self, f"scene_{saved.current_scene}", None):
             saved = None
-            delete_save(silent=True)
+        if not self.preferences_loaded:
+            if saved:
+                self.player.flags.update({key: saved.flags[key] for key in PREFERENCE_KEYS
+                                          if key in saved.flags})
+            self.player.flags.update(self.launch_overrides)
+            apply_audio_settings(self.player.flags)
+            self.preferences_loaded = True
 
-        options = ["New Game"]
-        if saved:
-            options.append(f"Continue as {saved.name} ({saved.character.title()})")
-        options.append("Quit")
-
-        choice = show_choices(options)
-
-        if choice == 1:
-            self.player = PlayerState(current_scene="intro")
-            save_game(self.player, silent=True)
-            return "intro"
-        elif choice == 2 and saved:
-            self.player = saved
-            print(f"\n  {Fore.GREEN}Welcome back, {self.player.name}.{Style.RESET_ALL}")
-            pause()
-            return self.player.current_scene
-        else:
-            self.running = False
-            return None
+        while True:
+            clear_screen()
+            width = min(74, max(30, shutil.get_terminal_size((80, 24)).columns - 4))
+            print()
+            print(f"{Fore.YELLOW}{Style.BRIGHT}{'STAR WARS'.center(width)}{Style.RESET_ALL}")
+            print(f"{Fore.RED}{Style.BRIGHT}{'DUEL OF FATES'.center(width)}{Style.RESET_ALL}")
+            print(f"{Style.DIM}{'A choice-driven story on the edge of the Empire'.center(width)}{Style.RESET_ALL}")
+            print(f"\n  {Style.DIM}{'-' * (width - 2)}{Style.RESET_ALL}\n")
+            print(f"  {Fore.YELLOW}[1]{Style.RESET_ALL} New Story")
+            print(f"  {Fore.YELLOW}[2]{Style.RESET_ALL} Continue" +
+                  ("" if saved else f"  {Style.DIM}(no saved story){Style.RESET_ALL}"))
+            if saved:
+                route = {"anakin": "Anakin", "obiwan": "Obi-Wan", "padme": "Padme"}.get(saved.character, "Prologue")
+                detail = f"{saved.name or 'New traveler'} / {route} / {saved.current_scene.replace('_', ' ').title()}"
+                print(f"      {Style.DIM}{textwrap.shorten(detail, width=width - 8, placeholder='...')}{Style.RESET_ALL}")
+            print(f"  {Fore.YELLOW}[3]{Style.RESET_ALL} Settings")
+            print(f"  {Fore.YELLOW}[4]{Style.RESET_ALL} Quit")
+            raw = input(f"\n  {Fore.YELLOW}Choose 1-4 > {Style.RESET_ALL}").strip().lower()
+            if raw == "1":
+                if saved:
+                    answer = input("  Replace your saved story? [Y] Yes / [N] Back > ").strip().lower()
+                    if answer not in {"y", "yes"}:
+                        continue
+                settings = {key: self.player.flags[key] for key in PREFERENCE_KEYS if key in self.player.flags}
+                self.player = PlayerState(current_scene="intro", flags=settings)
+                audio.play_sfx_cue("select")
+                save_game(self.player, silent=True)
+                return "intro"
+            if raw == "2" and saved:
+                settings = {key: self.player.flags[key] for key in PREFERENCE_KEYS if key in self.player.flags}
+                self.player = saved
+                self.player.flags.update(settings)
+                apply_audio_settings(self.player.flags)
+                return self.player.current_scene
+            if raw == "3":
+                show_terminal_settings(self.player)
+            elif raw in {"4", "q", "quit"}:
+                self.running = False
+                return None
+            elif raw == "2":
+                pause("No saved story yet. Press Enter to return...")
+            else:
+                pause("Choose 1, 2, 3, or 4. Press Enter to return...")
 
     def scene_intro(self):
         """Player enters their name and chooses a character."""
@@ -1398,21 +1594,15 @@ class GameEngine:
 
         self.player.name = ""
         while not self.player.name.strip():
-            self.player.name = input(f"\n  {Fore.YELLOW}What is your name, warrior? ▸ {Style.RESET_ALL}").strip()
+            self.player.name = input(f"\n  {Fore.YELLOW}Your name > {Style.RESET_ALL}").strip()[:24]
 
-        print()
-        type_text(f"Welcome, {self.player.name}. Choose your destiny.", color=Fore.YELLOW)
-        print()
-        type_text(
-            "Tip: During choice prompts, type S to save, L to load, C for codex, M for memories, or Q to quit.",
-            color=Fore.WHITE + Style.DIM,
-            speed=TYPE_SPEED_FAST,
-        )
+        clear_screen()
+        header_box("CHOOSE YOUR STORY", self.player.name, Fore.YELLOW)
 
         choice = show_choices([
-            f"{Fore.RED}Anakin Skywalker{Style.RESET_ALL} — The Chosen One, consumed by rage",
-            f"{Fore.CYAN}Obi-Wan Kenobi{Style.RESET_ALL} — The faithful Jedi, burdened by duty",
-            f"{Fore.MAGENTA}Padmé Amidala{Style.RESET_ALL} — The senator who can turn love into rebellion",
+            f"{Fore.RED}Anakin Skywalker{Style.RESET_ALL} - Power, loyalty, and redemption",
+            f"{Fore.CYAN}Obi-Wan Kenobi{Style.RESET_ALL} - Duty, brotherhood, and mercy",
+            f"{Fore.MAGENTA}Padmé Amidala{Style.RESET_ALL} - Conspiracy, diplomacy, and rebellion",
         ])
 
         if choice == 1:
@@ -1528,6 +1718,9 @@ class GameEngine:
                    color=Fore.WHITE)
         type_dialogue("Sidious Recording", "If Skywalker breaks, Kenobi will make him useful.",
                        Fore.MAGENTA)
+
+        self.offer_field_mission("archive")
+        header_box("SENATE RECORDS", "Your next move", Fore.BLUE)
 
         choice = show_choices([
             "Download the Mustafar Contingency as evidence.",
@@ -1974,6 +2167,7 @@ class GameEngine:
         type_text("A datapad on the desk contains a half-finished message from Nute Gunray "
                    "to an unknown recipient, pleading for help. You feel nothing.",
                    color=Fore.WHITE + Style.DIM)
+        self.offer_field_mission("ashwalk")
         pause()
         return "anakin_separatist_vault"
 
@@ -3142,8 +3336,12 @@ class GameEngine:
         print()
         choice = show_choices(["Play Again", "Quit"])
         if choice == 1:
-            self.player = PlayerState(current_scene="title")
+            settings = {key: self.player.flags[key] for key in
+                        PREFERENCE_KEYS
+                        if key in self.player.flags}
+            self.player = PlayerState(current_scene="title", flags=settings)
             self.running = True
+            self.restart_requested = True
         else:
             self.running = False
 
@@ -3154,12 +3352,49 @@ class GameEngine:
 
 if __name__ == "__main__":
     try:
-        engine = GameEngine()
-        engine.run()
+        import argparse
+
+        parser = argparse.ArgumentParser(description="Star Wars: Duel of Fates")
+        parser.add_argument("--arcade", action="store_true", help="open the pixel mission arcade")
+        parser.add_argument("--mission", choices=("ashwalk", "archive", "gauntlet", "duel"))
+        parser.add_argument("--character", choices=("anakin", "obiwan", "padme"), default="anakin")
+        parser.add_argument("--difficulty", choices=("story", "standard", "veteran"), default=None,
+                            help="difficulty for optional terminal missions (default: story)")
+        parser.add_argument("--ascii", action="store_true", help="use character tiles")
+        parser.add_argument("--reduced-motion", action="store_true")
+        parser.add_argument("--mute", action="store_true")
+        parser.add_argument("--classic", action="store_true", help=argparse.SUPPRESS)
+        args = parser.parse_args()
+        audio.set_muted(args.mute)
+        if args.arcade or args.mission:
+            if not ACTION_AVAILABLE:
+                print("Install the expansion dependencies: python3 -m pip install -r requirements.txt")
+            elif args.mission:
+                play_mission(args.mission, args.character, audio=audio,
+                             options=RenderOptions(args.ascii, args.reduced_motion),
+                             difficulty=args.difficulty or "story")
+            else:
+                arcade_menu(args.character, audio=audio,
+                            options=RenderOptions(args.ascii, args.reduced_motion),
+                            difficulty=args.difficulty or "story")
+        else:
+            engine = GameEngine()
+            engine.player.flags.update({"action_difficulty": args.difficulty or "story", "ascii_mode": args.ascii,
+                                        "reduced_motion": args.reduced_motion, "muted": args.mute})
+            for option, key in ((args.ascii, "ascii_mode"), (args.reduced_motion, "reduced_motion"),
+                                (args.mute, "muted")):
+                if option:
+                    engine.launch_overrides[key] = True
+            if args.difficulty is not None:
+                engine.launch_overrides["action_difficulty"] = args.difficulty
+            engine.run()
     except KeyboardInterrupt:
-        if 'engine' in locals() and getattr(engine, 'player', None):
+        if ('engine' in locals() and getattr(engine, 'player', None)
+                and engine.player.current_scene != "title"):
             save_game(engine.player, silent=True)
-        print(f"\n\n  {Fore.YELLOW}Progress saved. The Force will be with you... always.{Style.RESET_ALL}\n")
+            print(f"\n\n  {Fore.YELLOW}Progress saved.{Style.RESET_ALL}\n")
+        else:
+            print(f"\n\n  {Fore.YELLOW}The Force will be with you... always.{Style.RESET_ALL}\n")
         sys.exit(0)
     finally:
         audio.stop_music()

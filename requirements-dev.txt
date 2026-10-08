@@ -1,0 +1,4 @@
+-r requirements.txt
+Pillow>=10.0
+pexpect>=4.9; sys_platform != "win32"
+pyte>=0.8,<1

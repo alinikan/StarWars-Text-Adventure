@@ -41,7 +41,9 @@ flowchart LR
 
 ## Universal Combat Loop
 
-Most lightsaber duels pass through the same combat engine. Story choices before combat can change enemy strength, Force power, stamina pressure, or secret outcomes after victory.
+Campaign duels always use turn-based, numbered choices. Story choices before combat can change enemy strength, Force power, or secret outcomes after victory. Optional terminal missions do not replace either campaign duel.
+
+The following diagram documents the campaign combat loop. Optional mission controls are covered in [ACTION_GUIDE.md](ACTION_GUIDE.md).
 
 ```mermaid
 flowchart TD
@@ -77,6 +79,26 @@ flowchart TD
     classDef good fill:#14351f,stroke:#72df8a,color:#f3fff5,stroke-width:2px;
     classDef dark fill:#23080c,stroke:#ff5a76,color:#fff1f4,stroke-width:2px;
 ```
+
+## Optional Field Missions
+
+Two investigation scenes offer these missions after the narrative establishes their context. Continuing the story is the first choice; Settings can disable mission offers entirely. Standalone practice is available via the command line, with no campaign rewards.
+
+```mermaid
+flowchart TD
+    ASearch["Anakin: control-room search"] --> Foundry{"Enter Foundry mission?"}
+    PRecords["Padme: Senate records"] --> Archive{"Enter Archive mission?"}
+    Foundry -->|"Skip / abandon / defeat"| Resume["Continue the original story<br/>no campaign health penalty"]
+    Archive -->|"Skip / abandon / defeat"| Resume
+    Foundry -->|"Victory"| FReward["+1 clarity + Bacta<br/>+1 brotherhood<br/>codex + collected memory"]
+    Archive -->|"Victory"| PReward["+1 clarity + Bacta<br/>Rebellion Beacon + Bail network<br/>codex + collected memory"]
+    FReward --> Resume
+    PReward --> Resume
+    classDef mission fill:#163c37,stroke:#86e0ca,color:#f2fff9,stroke-width:2px;
+    class Foundry,Archive,FReward,PReward mission;
+```
+
+Campaign rewards are applied once per completed mission per run. Foundry and Archive each contain one new memory. The standalone three-wave Trial contains a third arcade memory. None of these missions adds or removes a narrative ending.
 
 ## Padme Route Map
 

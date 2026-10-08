@@ -31,6 +31,7 @@ var/
 
 # Virtual environments and dependencies
 venv/
+.venv/
 node_modules/
 .sass-cache/
 
@@ -67,6 +68,8 @@ __pycache__/
 
 # Runtime save data
 duel_of_fates_save.json
+duel_of_fates_profile.json
+duel_of_fates_profile.tmp
 
 # Private planning notes
 EXPANSION_IDEAS.md
